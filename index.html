@@ -300,6 +300,18 @@ function dfISO(y, mo, d){
 }
 function dfDisplay(iso){ return iso ? fmtDate(iso) : ''; }
 
+// Dates arriving from an uploaded ZEST03 can be in any format the source
+// document used ("20-Jul-2026", "20/07/2026"). Storage must stay ISO
+// (YYYY-MM-DD): a native <input type="date"> silently blanks anything else,
+// and the next save would then write that blank back, erasing the date.
+// So normalise on the way IN, and format only on the way OUT.
+function dfNormalise(v){
+  const raw = String(v||'').trim();
+  if (!raw) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;   // already ISO
+  return dfParse(raw) || raw;                          // else parse, else keep
+}
+
 function dateFieldHtml(id, iso, opts){
   const o = opts||{};
   const dis = o.disabled ? 'disabled' : '';
@@ -476,7 +488,7 @@ function renderSetupScreen() {
         <p class="text-sm" style="margin-bottom:14px">Connect this app to your Supabase backend to get started. You only need to do this once on this device.</p>
         <div class="field">
           <label>Backend URL</label>
-          <input type="text" id="setup-url" placeholder="https://your-project.supabase.co/functions/v1/epm-api">
+          <input type="text" id="setup-url" placeholder="https://vjakvbaxkspozyplpnan.supabase.co/functions/v1/epm-api">
         </div>
         <div id="setup-status" class="text-sm mt-1" style="margin-bottom:10px"></div>
         <button class="btn btn-gold btn-block" onclick="testAndSaveSetupUrl()">Connect</button>
@@ -1233,7 +1245,7 @@ function renderDashboardList(list) {
     cats.forEach(cat => {
       const catItems = sorted.filter(e => (e.estimateType||'project')===cat.type);
       if (!catItems.length) return;
-      html += `<div class="dash-cat-section"><div class="dash-cat-head">${cat.label} <span class="badge badge-neutral">${catItems.length}</span></div>`;
+      html += `<div class="dash-cat-section"><div class="embroidery" aria-hidden="true"></div><div class="dash-cat-head">${cat.label} <span class="badge badge-neutral">${catItems.length}</span></div>`;
       // FY groups within THIS category, newest FY first
       const fyMap = {};
       catItems.filter(e=>estimateFY(e)).forEach(e => { const fy=estimateFY(e); (fyMap[fy]=fyMap[fy]||[]).push(e); });
@@ -1258,7 +1270,7 @@ function renderDashboardList(list) {
       if (!items.length) return;
       DASH.groups['cat|'+cat.type] = items.map(e=>e.id);
       let sno = 0;
-      html += `<div class="dash-cat-section"><div class="dash-cat-head">${cat.label} <span class="badge badge-neutral">${items.length}</span></div><div class="flex-col gap-3">${items.map(e=>{ sno++; return estCardHtml(e, sno); }).join('')}</div></div>`;
+      html += `<div class="dash-cat-section"><div class="embroidery" aria-hidden="true"></div><div class="dash-cat-head">${cat.label} <span class="badge badge-neutral">${items.length}</span></div><div class="est-list">${items.map(e=>{ sno++; return estCardHtml(e, sno); }).join('')}</div></div>`;
     });
   }
   zone.innerHTML = html;
@@ -1277,20 +1289,26 @@ function dashFyGroupHtml(gid, label, ests, allChecked, open) {
         <span class="chev">▸</span>
       </div>
       <div class="collapse-body"><div class="collapse-body-inner">
-        <div class="flex-col gap-3">${ests.map(e=>{ sno++; return estCardHtml(e, sno); }).join('')}</div>
+        <div class="est-list">${ests.map(e=>{ sno++; return estCardHtml(e, sno); }).join('')}</div>
       </div></div>
     </div>`;
 }
 function estCardHtml(est, idx) {
   return `
-    <div class="est-card" onclick="navigateTo('estimate-edit',{id:'${est.id}'})">
+    <div class="est-card" data-type="${escapeHtml(est.estimateType||'project')}" tabindex="0"
+         onclick="navigateTo('estimate-edit',{id:'${est.id}'})"
+         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();navigateTo('estimate-edit',{id:'${est.id}'});}">
       ${DASH.selecting ? `<div class="est-check" onclick="event.stopPropagation()"><input type="checkbox" class="sel-check" ${DASH.sel && DASH.sel.has(est.id)?'checked':''} onclick="toggleDashEstimate('${est.id}', this.checked)" title="Include in export"></div>` : ''}
       <div class="est-sno">${idx}</div>
       <div class="est-icon">${estimateTypeIcon(est.estimateType)}</div>
       <div class="est-main">
         <div class="est-name">${escapeHtml(est.name||'Untitled Estimate')}</div>
         <div class="est-meta">
-          ${escapeHtml(est.number||'No number')} · ${escapeHtml(est.division||'—')} ·
+          <span class="est-num">${escapeHtml(est.number||'No number')}</span>
+          <span class="sep">/</span>
+          <span>${escapeHtml(est.division||'—')}</span>
+          <span class="sep">/</span>
+          <span>${escapeHtml(estimateTypeLabel(est.estimateType))}</span>
           <span class="badge ${est.status==='finalised'?'badge-ok':'badge-neutral'}">${est.status==='finalised'?'Finalised':'Draft'}</span>
           ${est.viewerVisible ? '<span class="badge badge-gold">Viewer-visible</span>' : ''}
         </div>
@@ -1721,7 +1739,13 @@ function applyRowStyles(ws, styleMap, colCount) {
     for (let c=0; c<colCount; c++) {
       const addr = XLSX.utils.encode_cell({r:rowIdx, c});
       if (!ws[addr]) ws[addr] = {t:'s', v:''};
-      ws[addr].s = style;
+      // Each cell gets its OWN style, with alignment and border cloned too.
+      // Sharing one object meant a later per-cell tweak leaked across the
+      // whole row and permanently altered the XLSX_STYLES preset.
+      ws[addr].s = Object.assign({}, style, {
+        alignment: Object.assign({}, style.alignment),
+        border:    style.border ? Object.assign({}, style.border) : undefined,
+      });
     }
   });
 }
@@ -1771,7 +1795,9 @@ function styleMsetclTitleRow(ws, colCount) {
     font: { name:EXPORT_FONT, bold:true, sz:14, color:{rgb:'000000'} },
     fill: { patternType:'solid', fgColor:{rgb:'D9DDE3'} },
     alignment: { horizontal:'center', vertical:'center', wrapText:false },
-    border: { bottom:{style:'medium', color:{rgb:'9AA3AF'}} }
+    // Matched to the outer frame and the header underline — a 'medium' rule
+    // here was the one remaining heavier line on summary sheets.
+    border: { bottom:{style:'thin', color:{rgb:'000000'}} }
   };
   setRowHeight(ws, 0, 24);
 }
@@ -1849,12 +1875,23 @@ const LUXE_BORDER_ALL = { top:LUXE_GRID, bottom:LUXE_GRID, left:LUXE_GRID, right
 // Exact column widths from the approved edited sheet (print-ready).
 const COLW_SECTION = [13.86, 22.43, 44.86, 13.86, 9, 12, 18.29, 13.86, 16.14, 21.86, 14, 13.86];
 const COLW_ABSTRACT = [15.86, 10, 15.86, 1.86, 16, 9, 2.57, 17.43, 14.86, 1.86, 20.71, 53.29];
-// Draw a medium outer border around the whole used range of a sheet.
+// Draw the outer border around the whole used range of a sheet.
+//
+// This was 'medium', and that is what made the vertical lines look heavy on
+// the banner rows above the header and on the total / amount-in-words rows
+// at the bottom. Those rows are MERGED across the full sheet width, so their
+// interior hair verticals disappear — leaving the medium sheet edge as the
+// only vertical line in the row, next to hair horizontals. On line-item rows
+// the same edge sits among dozens of hair verticals and reads as a normal
+// frame, which is why the problem only showed on the non-item rows.
+//
+// 'thin' matches _GOLD_EDGE, the heaviest horizontal line used anywhere, so
+// no vertical is ever bolder than the boldest horizontal.
 function drawOuterBorder(ws){
   if (!ws || !ws['!ref']) return;
   const X = window.XLSX;
   const range = X.utils.decode_range(ws['!ref']);
-  const EDGE = { style:'medium', color:{ rgb:'000000' } };
+  const EDGE = { style:'thin', color:{ rgb:'000000' } };
   for (let r=range.s.r; r<=range.e.r; r++){
     for (let c=range.s.c; c<=range.e.c; c++){
       const onTop=r===range.s.r, onBot=r===range.e.r, onLeft=c===range.s.c, onRight=c===range.e.c;
@@ -3964,7 +4001,7 @@ async function exportEstimateExcel() {
     for (let i=calcStart;i<=calcEnd;i++) fmtAmt(i, valueCol);
 
     // words row style (bold italic sz16, left, fill)
-    { const ad=XLSXmod.utils.encode_cell({r:wordsIdx,c:0}); if(ws[ad]) ws[ad].s=Object.assign({}, XLSX_STYLES.words); }
+    { const ad=XLSXmod.utils.encode_cell({r:wordsIdx,c:0}); if(ws[ad]) ws[ad].s=Object.assign({}, XLSX_STYLES.words, {alignment:Object.assign({}, XLSX_STYLES.words.alignment)}); }
 
     // ---- merges ----
     ws['!merges'] = ws['!merges'] || [];
@@ -3979,6 +4016,15 @@ async function exportEstimateExcel() {
       M(i, 0, valueCol-1); M(i, valueCol, statusCol);
       const ad=XLSXmod.utils.encode_cell({r:i,c:0}); if(ws[ad]){ ws[ad].s=ws[ad].s||{}; ws[ad].s.alignment=Object.assign({vertical:'center',wrapText:true},ws[ad].s.alignment,{horizontal:'right'}); }
     }
+    // Section / sub-total amounts are centred in their merged cell. This runs
+    // AFTER the label alignment tweaks above, so it is the last word on these
+    // cells regardless of what touched them earlier.
+    const centreAmt = (r)=>{ const ad=XLSXmod.utils.encode_cell({r,c:valueCol});
+      if(ws[ad]){ ws[ad].s=ws[ad].s||{};
+        ws[ad].s.alignment=Object.assign({}, ws[ad].s.alignment, {horizontal:'center', vertical:'center'}); } };
+    centreAmt(totalIdx);
+    for (let i=calcStart;i<=calcEnd;i++) centreAmt(i);
+
     M(calcEnd+1, 0, N-1);                             // blank before amount-in-words
     M(wordsIdx, 0, N-1);                              // amount in words A-L
     M(sigStart, 0, N-1); M(sigStart+1, 0, N-1);       // two blank rows above signatories
@@ -7009,7 +7055,7 @@ function renderOrderBookList(list) {
   groups.forEach(g => {
     const items = sorted.filter(e => categoryOf(e) === g.key);
     if (!items.length) return;
-    html += `<div class="dash-cat-section"><div class="dash-cat-head">${g.label} <span class="badge badge-neutral">${items.length}</span></div>`;
+    html += `<div class="dash-cat-section"><div class="embroidery" aria-hidden="true"></div><div class="dash-cat-head">${g.label} <span class="badge badge-neutral">${items.length}</span></div>`;
     // FY-based: collapsible groups, newest FY first; no-FY drafts at the bottom
     const fyMap = {};
     items.filter(e=>estimateFY(e)).forEach(e=>{ const fy=estimateFY(e); (fyMap[fy]=fyMap[fy]||[]).push(e); });
@@ -7550,7 +7596,7 @@ async function aicZestUpload(evt){
     };
     AIC.draftMeta = {
       name: parsed.meta.estFor || ('Estimate ' + (parsed.meta.estNo||'')),
-      number: parsed.meta.estNo || '', date: parsed.meta.estDate || '',
+      number: parsed.meta.estNo || '', date: dfNormalise(parsed.meta.estDate),
       sorVersions: parsed.meta.sor ? [parsed.meta.sor] : [],
       pmoPrEntries: [
         {label:'Supply Material', number:(built.prNos.supply||'').trim()},
@@ -8078,7 +8124,9 @@ function feFillPmoPrFromZest03(e, prNos, meta){
   // Fixed display sequence. Entries with no value are SKIPPED, so the ones
   // that follow move up — there are never blank gaps in the middle.
   const estNo   = String(meta.estNo||'').trim();
-  const estDate = String(meta.estDate||'').trim();
+  // fmtDate leaves an already-formatted value untouched, so this is safe
+  // whether the date came from an ISO estimate or from an uploaded ZEST03.
+  const estDate = fmtDate(String(meta.estDate||'').trim());
   const SEQUENCE = [
     {key:'supply',  label:'Supply PR',                 value:String(prNos.supply ||'').trim()},
     {key:'project', label:'Project Services PR',       value:String(prNos.project||'').trim()},
@@ -8182,7 +8230,7 @@ function feBuildSyntheticEstimate(){
     const b = FE.baseEstimate;
     est = {
       id:'', name:(m.estFor||b.name||('Final Estimate '+(m.estNo||''))).slice(0,120),
-      number:m.estNo||b.number||'', date:m.estDate||b.date||'',
+      number:m.estNo||b.number||'', date:dfNormalise(m.estDate||b.date||''),
       division:b.division||'', work:m.estFor||b.work||'', sorVersions:m.sor?[m.sor]:(b.sorVersions||[]),
       estimateType:b.estimateType||'project', amcAmount:0, finalTotal:0,
       addCharge:b.addCharge||{}, settings:b.settings||{}, pmoPrEntries:[], progressImages:[],
@@ -8190,7 +8238,7 @@ function feBuildSyntheticEstimate(){
     };
   } else {
     est = {
-      id:'', name:(m.estFor||('Final Estimate '+(m.estNo||''))).slice(0,120), number:m.estNo||'', date:m.estDate||'',
+      id:'', name:(m.estFor||('Final Estimate '+(m.estNo||''))).slice(0,120), number:m.estNo||'', date:dfNormalise(m.estDate),
       division:FE.division||'', work:m.estFor||'', sorVersions:m.sor?[m.sor]:[],
       estimateType:FE.estimateType, amcAmount:0, finalTotal:0,
       addCharge:{ supply:FE.acSupply?'yes':'no', project:FE.acProject?'yes':'no', nonsor_supply:'no' },
@@ -8478,11 +8526,28 @@ function renderFinalEstimateResult(){
           <div class="fe-sig-office">${escapeHtml(x.office||'')}</div></td>`).join('')}</tr></tbody></table>`;
   })();
   const abstractRows = feWithSynthetic(()=> abstractSheetRows(true));
-  const secRows = feWithSynthetic(()=> ({
-    supply: res.supply.length?sectionItemTableRows('supply'):null,
-    project: res.project.length?sectionItemTableRows('project'):null,
-    om: res.om.length?sectionItemTableRows('om'):null,
-  }));
+  // Five sections, matching the Excel export exactly.
+  //
+  // The old version built only supply/project/om, and keyed them off
+  // res.supply.length — the RAW ZEST03 group, which mixes SoR and Non-SOR
+  // together. But sectionConfig('supply') filters to `!isCustom`, so every
+  // Non-SOR item was dropped from the table while still being counted in the
+  // header badge. Result: Non-SOR materials and services appeared in the
+  // Excel download but were invisible in the preview, and the item counts
+  // disagreed with the rows beneath them.
+  //
+  // Counts now come from the same filter that produces the rows, so the
+  // badge can never contradict the table.
+  const secRows = feWithSynthetic(()=>{
+    const build = (key)=>{
+      const n = (sectionConfig(key).items||[]).length;
+      return { rows: n ? sectionItemTableRows(key) : null, count: n };
+    };
+    return {
+      supply: build('supply'), project: build('project'), om: build('om'),
+      nonsor_supply: build('nonsor_supply'), nonsor_om: build('nonsor_om'),
+    };
+  });
   const secTbl = (secKey, rows) => {
     const head = rows[0], body = rows.slice(1);
     const fullIdx = head.findIndex(h=>/full\s*description/i.test(String(h)));
@@ -8506,7 +8571,7 @@ function renderFinalEstimateResult(){
   };
   let html = `
     <div class="card fe-noprint" style="margin-bottom:14px">
-      <div><div class="fw-700">Estimation No: ${escapeHtml(m.estNo||'—')} &nbsp;|&nbsp; SOR: ${escapeHtml(m.sor||'—')} &nbsp;|&nbsp; Date: ${escapeHtml(m.estDate||'—')}</div>
+      <div><div class="fw-700">Estimation No: ${escapeHtml(m.estNo||'—')} &nbsp;|&nbsp; SOR: ${escapeHtml(m.sor||'—')} &nbsp;|&nbsp; Date: ${escapeHtml(fmtDate(m.estDate)||'—')}</div>
       <div class="text-sm text-muted">${escapeHtml(m.estFor||'')}</div></div>
       <div class="collapse" style="margin-top:10px">
         <div class="collapse-head" onclick="toggleCollapse(this)"><span class="fw-700 text-sm">⬇ Download Final Estimate</span><span class="chev">▸</span></div>
@@ -8522,9 +8587,23 @@ function renderFinalEstimateResult(){
       </div>
     </div>
     <div class="card fe-print-page" style="margin-bottom:14px"><h3>Abstract</h3>${tbl(abstractRows, true)}${sigHtml}</div>`;
-  [['supply','Supply Material',res.supply,secRows.supply],['project','ETC — Project Services',res.project,secRows.project],['om','O&M Services',res.om,secRows.om]].forEach(([key,title,items,rows])=>{
-    html += `<div class="card${rows?' fe-print-page':' fe-noprint'}" style="margin-bottom:14px"><h3>${title} <span class="badge badge-neutral">${items.length} items</span>${res.prNos[key]?` <span class="text-sm text-muted">PR: ${escapeHtml(res.prNos[key])}</span>`:''}</h3>
-      ${rows?secTbl(key, rows):'<p class="text-muted text-sm">No items in this section.</p>'}</div>`;
+  // Non-SOR sections carry the PR of the part they belong to, and are shown
+  // only when they actually contain something — an empty "Non-SOR Services"
+  // card on every estimate would be noise.
+  const FE_SECTIONS = [
+    ['supply',        'Supply Material',        'supply', true ],
+    ['project',       'ETC — Project Services', 'project', true ],
+    ['om',            'O&M Services',           'om',      true ],
+    ['nonsor_supply', 'Non-SOR Materials',      'supply', false],
+    ['nonsor_om',     'Non-SOR Services',       'om',     false],
+  ];
+  FE_SECTIONS.forEach(([key, title, prKey, alwaysShow])=>{
+    const sec = secRows[key] || {rows:null, count:0};
+    if (!alwaysShow && !sec.count) return;
+    const pr = res.prNos[prKey];
+    const badge = key.indexOf('nonsor')===0 ? 'badge-gold' : 'badge-neutral';
+    html += `<div class="card${sec.rows?' fe-print-page':' fe-noprint'}" style="margin-bottom:14px"><h3>${title} <span class="badge ${badge}">${sec.count} items</span>${pr?` <span class="text-sm text-muted">PR: ${escapeHtml(pr)}</span>`:''}</h3>
+      ${sec.rows?secTbl(key, sec.rows):'<p class="text-muted text-sm">No items in this section.</p>'}</div>`;
   });
   if (res.notFound.length){
     html += `<div class="card fe-noprint" style="margin-bottom:14px"><h3>⚠ Items Not Classified <span class="badge badge-neutral">${res.notFound.length}</span></h3>

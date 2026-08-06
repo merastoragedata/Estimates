@@ -431,24 +431,87 @@ tbody tr:last-child td{border-bottom:none}
   display:flex; align-items:center; gap:8px; margin-bottom:10px; padding-bottom:8px; border-bottom:2px solid var(--gold-500);
 }
 
-/* dashboard estimate cards */
+/* rows sit flush, separated by their own hairline — not by gaps */
+.est-list{ display:flex; flex-direction:column; }
+.est-list .est-card:last-child{ border-bottom-color:transparent; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   DASHBOARD ESTIMATE ROWS — "busbar tap-off"
+   Each estimate reads as a tap-off from a vertical busbar running down the
+   list: a conductor rail on the left, an insulator node at the serial, and
+   the amount as the terminal reading. The rail's colour encodes work type,
+   so type is legible without reading a word. Hovering ENERGISES the rail
+   rather than lifting the row into a glowing box — the list stays still and
+   scannable while the pointer moves down it.
+   ═══════════════════════════════════════════════════════════════════════ */
 .est-card{
-  display:flex; align-items:center; gap:14px; padding:14px 16px; border-radius:var(--radius-md);
-  border:1px solid var(--line); background:var(--surface); transition:all var(--dur) var(--ease); cursor:pointer;
+  --rail:var(--steel-400,#94a3b8);
+  display:flex; align-items:center; gap:14px;
+  padding:15px 18px 15px 0; border-radius:var(--radius-md);
+  border:1px solid transparent; border-bottom-color:var(--line);
+  background:transparent; cursor:pointer;
+  transition:background var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
-.est-card:hover{box-shadow:var(--shadow-md); border-color:var(--steel-400); transform:translateY(-1px)}
-.est-card .est-sno{flex:none; width:26px; text-align:center; font-family:var(--font-mono); font-weight:700; font-size:12px; color:var(--steel-600)}
-.est-card .est-icon{width:42px; height:42px; border-radius:10px; background:var(--surface-3); display:flex; align-items:center; justify-content:center; font-size:18px; flex:none}
+/* the conductor rail */
+.est-card::before{
+  content:''; flex:none; align-self:stretch; width:3px; margin-right:2px;
+  border-radius:0 3px 3px 0; background:var(--rail); opacity:.45;
+  transition:opacity var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.est-card:hover{ background:var(--surface-2,#f4f6fa); border-color:var(--line); }
+.est-card:hover::before{ opacity:1; box-shadow:0 0 8px -1px var(--rail); }
+.est-card:focus-visible{ outline:2px solid var(--gold-500,#b8860b); outline-offset:2px; }
+
+/* work-type colour coding, carried by the rail and the icon tile */
+.est-card[data-type="project"]{ --rail:#4f46e5; }
+.est-card[data-type="rm"]     { --rail:#0d9488; }
+.est-card[data-type="amc"]    { --rail:#b8860b; }
+
+/* insulator node — the serial sits on the rail */
+.est-card .est-sno{
+  flex:none; width:26px; text-align:center; font-family:var(--font-mono);
+  font-weight:700; font-size:11px; color:var(--steel-600);
+  font-variant-numeric:tabular-nums;
+}
+.est-card .est-icon{
+  width:38px; height:38px; border-radius:10px; flex:none;
+  display:flex; align-items:center; justify-content:center; font-size:17px;
+  background:color-mix(in srgb, var(--rail) 12%, transparent);
+  box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--rail) 22%, transparent);
+}
 .est-card .est-main{flex:1; min-width:0}
-.est-card .est-name{font-weight:700; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
-.est-card .est-meta{font-size:12px; color:var(--steel-600); margin-top:2px}
-.est-card .est-total{font-family:var(--font-mono); font-weight:700; font-size:14px; text-align:right; white-space:nowrap}
-.est-card .est-actions{display:flex; gap:6px; flex:none}
+.est-card .est-name{
+  font-weight:600; font-size:14px; letter-spacing:-.005em; color:var(--ink,#1f2937);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+/* meta reads as an equipment label: uppercase, tracked, quiet */
+.est-card .est-meta{
+  font-size:11px; color:var(--steel-600); margin-top:3px;
+  display:flex; align-items:center; gap:7px; flex-wrap:wrap;
+  letter-spacing:.03em;
+}
+.est-card .est-meta .est-num{ font-family:var(--font-mono); text-transform:none; letter-spacing:0; }
+.est-card .est-meta .sep{ opacity:.4 }
+/* terminal reading */
+.est-card .est-total{
+  font-family:var(--font-mono); font-weight:700; font-size:15px; text-align:right;
+  white-space:nowrap; color:var(--navy-900,#1c2536); font-variant-numeric:tabular-nums;
+}
+.est-card .est-actions{display:flex; gap:4px; flex:none; opacity:.45; transition:opacity var(--dur) var(--ease)}
+.est-card:hover .est-actions, .est-card:focus-within .est-actions{opacity:1}
+@media(hover:none){ .est-card .est-actions{opacity:1} }
+
 @media(max-width:680px){
-  .est-card{flex-wrap:wrap}
+  /* On a phone the row wraps to two lines. The rail must keep running the
+     full height of the wrapped row, so it stays a stretch item and the name
+     takes the first line on its own with the amount beneath it. */
+  .est-card{flex-wrap:wrap; gap:10px; padding:13px 12px 13px 0}
   .est-card .est-icon{display:none}
-  .est-card .est-main{flex:1 1 100%}
-  .est-card .est-total, .est-card .est-actions{flex:none}
+  .est-card .est-main{flex:1 1 100%; order:1}
+  .est-card .est-sno{order:0}
+  .est-card .est-total{order:2; flex:1 1 auto; text-align:left; font-size:14px}
+  .est-card .est-actions{order:3; flex:none; opacity:1}
+  .est-card .est-meta{font-size:10.5px; gap:5px}
 }
 
 /* stat cards (dashboard) */
@@ -679,18 +742,18 @@ h1,h2,h3,h4{font-family:var(--font-display); letter-spacing:-.02em}
   border:1px solid var(--line); box-shadow:var(--shadow-sm);
   transition:transform var(--dur) var(--ease-out), box-shadow var(--dur) var(--ease-out), border-color var(--dur) var(--ease-out);
 }
-.card.hoverable:hover,.est-card:hover{
+.card.hoverable:hover{
   transform:translateY(-3px); box-shadow:var(--shadow-lg); border-color:transparent;
 }
 /* gradient border glow on hover for interactive cards */
-.card.hoverable::after,.est-card::after,.stat-card::after{
+.card.hoverable::after,.stat-card::after{
   content:''; position:absolute; inset:-1px; border-radius:inherit; padding:1px; pointer-events:none;
   background:linear-gradient(130deg,rgba(0,212,255,.0),rgba(79,70,229,.0) 40%,rgba(212,175,55,.0));
   -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
   -webkit-mask-composite:xor; mask-composite:exclude;
   opacity:0; transition:opacity var(--dur) var(--ease), background var(--dur) var(--ease);
 }
-.card.hoverable:hover::after,.est-card:hover::after,.stat-card:hover::after{
+.card.hoverable:hover::after,.stat-card:hover::after{
   opacity:1;
   background:linear-gradient(130deg,rgba(0,212,255,.55),rgba(79,70,229,.55) 45%,rgba(212,175,55,.6));
 }
@@ -1166,14 +1229,20 @@ body::after{
 /* (content-visibility removed from .est-card — it suppressed the embroidery paint) */
 .fy-collapse{ content-visibility:auto; contain-intrinsic-size:auto 60px; }
 
-/* ── Subtle floral embroidery on home cards (very low opacity, non-intrusive) ── */
-.est-card{ position:relative; overflow:hidden; }
-.est-card::after{
-  content:''; position:absolute; right:-10px; bottom:-10px; width:120px; height:120px; z-index:0; pointer-events:none;
-  opacity:.13;
-  background:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' fill='none' stroke='%231f2937' stroke-width='1.4'><g><circle cx='50' cy='50' r='7'/><path d='M50 43c-6-10 0-22 0-22s6 12 0 22z'/><path d='M50 57c6 10 0 22 0 22s-6-12 0-22z'/><path d='M43 50c-10-6-22 0-22 0s12 6 22 0z'/><path d='M57 50c10 6 22 0 22 0s-12-6-22 0z'/><path d='M45 45c-8-8-20-6-20-6s5 11 20 6z'/><path d='M55 55c8 8 20 6 20 6s-5-11-20-6z'/><path d='M55 45c8-8 20-6 20-6s-5 11-20 6z'/><path d='M45 55c-8 8-20 6-20 6s5-11 20-6z'/></g></svg>") no-repeat center/contain;
+/* ── Floral embroidery on home cards ────────────────────────────────────
+   Previously attached to .est-card::after, which the hover glow-ring rule
+   also owned. The flower rule won on background but inherited the ring's
+   padding:1px + mask-composite:exclude, which clipped the motif down to an
+   invisible one-pixel ring — which is why it never appeared. It now lives on
+   .card (the real panels), on its own element, with no mask involved. ── */
+.dash-cat-section, .card.has-embroidery{ position:relative; overflow:hidden; }
+.dash-cat-section > .embroidery,
+.card.has-embroidery > .embroidery{
+  position:absolute; right:-18px; bottom:-18px; width:150px; height:150px;
+  z-index:0; pointer-events:none; opacity:.07;
+  background:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' fill='none' stroke='%231f2937' stroke-width='1.2'><g><circle cx='50' cy='50' r='6.5'/><path d='M50 43.5c-6-10 0-22 0-22s6 12 0 22z'/><path d='M50 56.5c6 10 0 22 0 22s-6-12 0-22z'/><path d='M43.5 50c-10-6-22 0-22 0s12 6 22 0z'/><path d='M56.5 50c10 6 22 0 22 0s-12-6-22 0z'/><path d='M45 45c-8-8-20-6-20-6s5 11 20 6z'/><path d='M55 55c8 8 20 6 20 6s-5-11-20-6z'/><path d='M55 45c8-8 20-6 20-6s-5 11-20 6z'/><path d='M45 55c-8 8-20 6-20 6s5-11 20-6z'/></g></svg>") no-repeat center/contain;
 }
-.est-card > *{ position:relative; z-index:1; }
+.dash-cat-section > *:not(.embroidery){ position:relative; z-index:1; }
 
 /* ── Side panel: subtle line embroidery only (no flowers) ── */
 .sidebar, .side-nav, nav.sidebar{ position:relative; }
