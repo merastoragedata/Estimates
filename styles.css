@@ -1368,6 +1368,8 @@ body::after{
   background:#FFF8DC !important; -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
 
 
+.ok-text{ color:var(--ok-500,#0f7b45); font-weight:600; }
+
 /* ── Build stamp ────────────────────────────────────────────────────────
    Tiny, fixed, low-contrast. Its only job is to answer "is the live site
    actually running the file I just uploaded?" without opening a console.

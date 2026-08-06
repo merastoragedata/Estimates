@@ -8,7 +8,7 @@
 /* Build stamp. Check the live site is running this file:
    open the browser console (F12) — the build id is printed on load.
    It is also shown at the bottom-right of the login screen. */
-window.__BUILD = "2026-08-06-b";
+window.__BUILD = "2026-08-06-d";
 document.addEventListener("DOMContentLoaded", function(){
   var el = document.createElement("div");
   el.id = "build-stamp";
@@ -50,7 +50,7 @@ window.__EARLY_BOOT = (function () {
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" onload="this.onload=null;this.rel='stylesheet'">
 <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap"></noscript>
-<link rel="stylesheet" href="styles.css?v=2026-08-06-b">
+<link rel="stylesheet" href="styles.css?v=2026-08-06-d">
 </head>
 <body>
 <div id="app"></div>
@@ -2648,6 +2648,163 @@ function splitKey(key) {
 // ══════════════════════════════════════════════════════════════
 // ADD NON-SOR ITEM MODAL
 // ══════════════════════════════════════════════════════════════
+// One button, two routes. Adding a single item is far more common, so it is
+// listed first and described in the same words as the form it opens.
+function openNonSORAddChooser(context){
+  openModal(`
+    <div class="modal-head"><h3>Add Non-SOR Items</h3><button class="modal-close" onclick="closeModal()">✕</button></div>
+    <p class="text-sm text-muted" style="margin:0 0 14px">How many are you adding?</p>
+    <div class="flex-col gap-2">
+      <button class="btn btn-gold w-full" style="justify-content:flex-start; text-align:left; padding:14px 16px; height:auto"
+              onclick="openAddNonSORModal('${context}')">
+        <span style="font-size:18px; margin-right:12px">✏️</span>
+        <span><span class="fw-700">One item</span><br>
+        <span class="text-sm" style="opacity:.85">Type in the number, description, rate and section.</span></span>
+      </button>
+      <button class="btn btn-ghost w-full" style="justify-content:flex-start; text-align:left; padding:14px 16px; height:auto"
+              onclick="openNonSORBulkModal('${context}')">
+        <span style="font-size:18px; margin-right:12px">📚</span>
+        <span><span class="fw-700">Many items from a spreadsheet</span><br>
+        <span class="text-sm text-muted">Download the template, fill it in, upload it back.</span></span>
+      </button>
+    </div>
+  `);
+}
+
+function openNonSORBulkModal(context){
+  openModal(`
+    <div class="modal-head"><h3>Bulk Add Non-SOR Items</h3><button class="modal-close" onclick="closeModal()">✕</button></div>
+    <ol class="text-sm" style="padding-left:18px; line-height:1.9; margin:0 0 14px">
+      <li>Download the template.</li>
+      <li>Fill one row per item. Keep the header row as it is.</li>
+      <li>Upload it here.</li>
+    </ol>
+    <div class="flex gap-2" style="flex-wrap:wrap">
+      <button class="btn btn-ghost" onclick="nonSorTemplateDownload()">⬇ Download template</button>
+      <button class="btn btn-gold" onclick="document.getElementById('ns-bulk-file').click()">📤 Upload filled file</button>
+      <input type="file" id="ns-bulk-file" accept=".xlsx,.xls,.csv" style="display:none" onchange="nonSorBulkUpload(event,'${context}')">
+    </div>
+    <p class="hint mt-2">Item numbers already in the catalog are left exactly as they are — an upload can only add new items, never overwrite a stored rate or description.</p>
+    <div id="ns-bulk-status" class="text-sm mt-2"></div>
+  `);
+}
+
+async function nonSorTemplateDownload(){
+  try {
+    const X = await ensureSheetJS();
+    const rows = [
+      ['Non-SOR Items — Upload Template'],
+      ['One row per item. Section must be either supply (material) or om (service).'],
+      ['Item numbers that already exist in the catalog will be skipped, not overwritten.'],
+      [],
+      ['Item No','Description','UOM','Rate (Rs.)','Section','Remarks'],
+      ['NS-CABLE-01','Example non-SOR material','Mtr',450,'supply','Rate as per vendor quotation'],
+      ['NS-SVC-01','Example non-SOR service','Job',18000,'om','Lump sum'],
+    ];
+    const ws = X.utils.aoa_to_sheet(rows);
+    ws['!cols']=[{wch:20},{wch:44},{wch:10},{wch:14},{wch:12},{wch:34}];
+    ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:5}},{s:{r:1,c:0},e:{r:1,c:5}},{s:{r:2,c:0},e:{r:2,c:5}}];
+    const wb=X.utils.book_new(); X.utils.book_append_sheet(wb, ws, 'Non-SOR');
+    X.writeFile(wb, 'NonSOR_Upload_Template.xlsx');
+    toast('Template downloaded — fill it in and upload it back.','ok');
+  } catch(err){ toast('Template failed: '+(err.message||'error'),'err',6000); }
+}
+
+async function nonSorBulkUpload(evt, context){
+  const file = evt.target.files[0]; evt.target.value='';
+  if (!file) return;
+  const status = document.getElementById('ns-bulk-status');
+  const say = (html)=>{ if(status) status.innerHTML = html; };
+  say('<span class="spinner dark"></span> Reading the file…');
+  try {
+    const X = await ensureSheetJS();
+    const wb = X.read(await file.arrayBuffer(), {type:'array'});
+    const grid = X.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header:1, blankrows:false, defval:''});
+
+    // Find the header wherever it sits — the template has title rows above it,
+    // and people add their own notes, so a fixed row index would be brittle.
+    const hIdx = grid.findIndex(r=> r.some(c=>/^(item\s*no|material\s*\/?\s*service\s*no)/i.test(String(c).trim())));
+    if (hIdx<0) throw new Error('Could not find the header row. Keep the row starting with "Item No" from the template.');
+    const H = grid[hIdx].map(c=>String(c).trim());
+    const ci = {
+      no:   H.findIndex(c=>/^(item\s*no|material\s*\/?\s*service\s*no)/i.test(c)),
+      desc: H.findIndex(c=>/description/i.test(c)),
+      uom:  H.findIndex(c=>/uom|unit/i.test(c)),
+      rate: H.findIndex(c=>/rate|price|amount/i.test(c)),
+      sec:  H.findIndex(c=>/section|type/i.test(c)),
+      rem:  H.findIndex(c=>/remark|note/i.test(c)),
+    };
+
+    const cell = (row,i)=> i>=0 ? String(row[i]==null?'':row[i]).trim() : '';
+    const items = []; const missingDesc = []; const seen = new Set(); const dupInFile = [];
+    for (let r=hIdx+1; r<grid.length; r++){
+      const row = grid[r];
+      const item_no = cell(row, ci.no);
+      if (!item_no) continue;
+      const description = cell(row, ci.desc);
+      if (!description) { missingDesc.push(item_no); continue; }
+      if (seen.has(item_no)) { dupInFile.push(item_no); continue; }
+      seen.add(item_no);
+      let section = cell(row, ci.sec).toLowerCase();
+      section = /o&m|^om$|service/.test(section) ? 'om' : 'supply';
+      items.push({ item_no, description, uom: cell(row, ci.uom),
+        rate: parseFloat(String(cell(row, ci.rate)).replace(/[₹,\s]/g,''))||0,
+        section, remarks: cell(row, ci.rem), addedBy: ST.user.id });
+    }
+    if (!items.length) throw new Error('No rows with an item number were found.');
+
+    // Items go in one at a time through the SAME endpoint the single-item form
+    // uses, so catalog rules are enforced in exactly one place: an item number
+    // already in the catalog is rejected there, never overwritten. Six at a
+    // time keeps a 100-row upload to a few seconds without flooding the
+    // backend.
+    const added = []; const already = []; const failed = [];
+    let done = 0;
+    const worker = async (queue)=>{
+      for(;;){
+        const it = queue.shift(); if (!it) return;
+        try {
+          const res = await apiPost({action:'addNonSOR', item:it});
+          if (res.ok) added.push(it);
+          else if (/already exists/i.test(res.error||'')) already.push(it.item_no);
+          else failed.push(it.item_no+' ('+(res.error||'failed')+')');
+        } catch(e){ failed.push(it.item_no+' ('+(e.message||'network error')+')'); }
+        done++;
+        say('<span class="spinner dark"></span> Adding… '+done+' of '+items.length);
+      }
+    };
+    const queue = items.slice();
+    await Promise.all([1,2,3,4,5,6].map(()=>worker(queue)));
+
+    // Update the cache in place rather than refetching the whole catalog.
+    ST.nonSorCache = ST.nonSorCache || [];
+    added.forEach(it=> ST.nonSorCache.push({
+      item_no:it.item_no, description:it.description, uom:it.uom, rate:it.rate,
+      section:it.section, remarks:it.remarks, addedBy:ST.user.id,
+      addedAt:new Date().toISOString(), version:'NONSOR'}));
+
+    const bits = [`<b>${added.length}</b> item${added.length===1?'':'s'} added`];
+    if (already.length)    bits.push(`${already.length} already in the catalog`);
+    if (dupInFile.length)  bits.push(`${dupInFile.length} repeated in the file`);
+    if (missingDesc.length)bits.push(`${missingDesc.length} with no description`);
+    if (failed.length)     bits.push(`<span class="error-text">${failed.length} failed</span>`);
+    let html = `<div class="ok-text">${bits.join(' · ')}</div>`;
+    const skipped = [].concat(already, dupInFile, missingDesc).slice(0,25);
+    if (skipped.length) html += `<div class="text-sm text-muted mt-1">Skipped: ${skipped.map(escapeHtml).join(', ')}${
+      (already.length+dupInFile.length+missingDesc.length)>25?' …':''}</div>`;
+    if (failed.length) html += `<div class="text-sm error-text mt-1">${failed.slice(0,10).map(escapeHtml).join('<br>')}</div>`;
+    say(html);
+
+    toast(added.length ? `${added.length} Non-SOR item${added.length===1?'':'s'} added.`
+                       : 'Nothing new to add — every item was already in the catalog.',
+          added.length ? 'ok' : 'warn', 5000);
+    if (document.getElementById('rates-nonsor-body')) renderRatesNonSORTable();
+    if (document.getElementById('ai-results-body')) renderAIResults();
+  } catch(err){
+    say(`<span class="error-text">${escapeHtml(err.message||'Upload failed')}</span>`);
+  }
+}
+
 function openAddNonSORModal(context, editItem=null) {
   const isEdit = !!editItem;
   openModal(`
@@ -5232,7 +5389,7 @@ function renderRPNonSor(zone) {
     <div class="card">
       <div class="card-head">
         <h3>Non-SOR Items</h3>
-        ${canEdit() ? `<button class="btn btn-gold btn-sm" onclick="openAddNonSORModal('rates')">+ Add Non-SOR Item</button>` : ''}
+        ${canEdit() ? `<button class="btn btn-gold btn-sm" onclick="openNonSORAddChooser('rates')">+ Add Non-SOR Item</button>` : ''}
       </div>
       <div class="flex gap-2" style="margin-bottom:12px">
         <input type="text" id="rp-ns-search" placeholder="Search…" oninput="onRPNSSearchInput()" style="flex:1">
