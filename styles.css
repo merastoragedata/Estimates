@@ -1366,3 +1366,15 @@ body::after{
 .fe-preview tbody tr:nth-child(even) tr.fe-nonsor td{ background:#FFF8DC !important; }
 @media print{ #fe-print-portal .fe-preview tbody tr.fe-nonsor td{
   background:#FFF8DC !important; -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
+
+
+/* ── Build stamp ────────────────────────────────────────────────────────
+   Tiny, fixed, low-contrast. Its only job is to answer "is the live site
+   actually running the file I just uploaded?" without opening a console.
+   The text is injected by index.html into #build-stamp. ── */
+#build-stamp{
+  position:fixed; right:8px; bottom:6px; z-index:9998;
+  font-family:var(--font-mono, monospace); font-size:9.5px; letter-spacing:.04em;
+  color:var(--steel-600,#54627e); opacity:.4; pointer-events:none; user-select:none;
+}
+@media print{ #build-stamp{ display:none } }
