@@ -8,7 +8,7 @@
 /* Build stamp. Check the live site is running this file:
    open the browser console (F12) — the build id is printed on load.
    It is also shown at the bottom-right of the login screen. */
-window.__BUILD = "2026-08-06-o";
+window.__BUILD = "2026-08-06-p";
 document.addEventListener("DOMContentLoaded", function(){
   var el = document.createElement("div");
   el.id = "build-stamp";
@@ -50,7 +50,7 @@ window.__EARLY_BOOT = (function () {
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" onload="this.onload=null;this.rel='stylesheet'">
 <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap"></noscript>
-<link rel="stylesheet" href="styles.css?v=2026-08-06-o">
+<link rel="stylesheet" href="styles.css?v=2026-08-06-p">
 </head>
 <body>
 <div id="app"></div>
@@ -4516,11 +4516,16 @@ function pdfTableNode(headers, rows, opt){
   });
   if (headers) measure(headers, true);
   rows.forEach(r=>measure(r, false));
-  // Explicit user weights (from the website width editor) win outright:
-  if (opt.weights && opt.weights.length===ncols && opt.weights.some(w=>w>0)) {
-    const tw = opt.weights.reduce((a,b)=>a+(+b||1),0);
-    const explicit = opt.weights.map(w => Math.max((+w||1)/tw*pageW, 16));
-    return buildPdfTable(explicit);
+  // Explicit weights win outright. They are padded/trimmed to ncols rather
+  // than requiring an exact match: one body row longer than the header used to
+  // silently discard the caller's widths and fall back to guessing.
+  if (opt.weights && opt.weights.some(w=>w>0)) {
+    const wArr = new Array(ncols).fill(0).map((_,i)=> +opt.weights[i] || 0);
+    const missing = wArr.reduce((a,b)=>a+(b>0?0:1),0);
+    if (missing) { const avg = wArr.reduce((a,b)=>a+b,0) / Math.max(ncols-missing,1);
+                   for (let i=0;i<ncols;i++) if (!wArr[i]) wArr[i] = avg; }
+    const tw = wArr.reduce((a,b)=>a+b,0);
+    return buildPdfTable(wArr.map(w => w/tw*pageW));
   }
   // convert to pt (≈0.52·fs per char + cell padding), then normalise to fit
   const pt = charLen.map(L => L * fs * 0.52 + 8);
@@ -4561,6 +4566,12 @@ function pdfTableNode(headers, rows, opt){
   }
   return buildPdfTable(widths);
   function buildPdfTable(w){
+    // Final guarantee: the columns sum to exactly the usable page width. Any
+    // per-column minimum applied upstream can push the total over the page,
+    // and pdfmake silently clips the overflow instead of reporting it.
+    const sum = w.reduce((a,b)=>a+b,0);
+    if (sum > pageW) { const k = pageW / sum; w = w.map(x=>x*k); }
+    else if (sum < pageW - 1) { const k = pageW / sum; w = w.map(x=>x*k); }
     const body = [];
     if (headers) body.push(pad(headers).map(hd=>({ text:pdfText(hd), bold:true, color:PDF_TXT, fillColor:PDF_GOLD_PALE, fontSize:fs })));
     rows.forEach((r,ri)=>{
