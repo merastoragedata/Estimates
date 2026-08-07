@@ -8,7 +8,7 @@
 /* Build stamp. Check the live site is running this file:
    open the browser console (F12) — the build id is printed on load.
    It is also shown at the bottom-right of the login screen. */
-window.__BUILD = "2026-08-06-i";
+window.__BUILD = "2026-08-06-k";
 document.addEventListener("DOMContentLoaded", function(){
   var el = document.createElement("div");
   el.id = "build-stamp";
@@ -50,7 +50,7 @@ window.__EARLY_BOOT = (function () {
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" onload="this.onload=null;this.rel='stylesheet'">
 <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap"></noscript>
-<link rel="stylesheet" href="styles.css?v=2026-08-06-i">
+<link rel="stylesheet" href="styles.css?v=2026-08-06-k">
 </head>
 <body>
 <div id="app"></div>
@@ -1773,17 +1773,26 @@ function setRowHeight(ws, rowIdx, pts) {
 // the following 3 header lines (division/scope/estimation no.) centered
 // and bold but smaller. colCount must match the sheet's actual width so
 // the merge spans correctly regardless of how many columns the sheet has. ──
+// Row 0 = company name (37pt). Row 1 = sheet title (28pt). Both centred on a
+// light grey band. Rows 2-4 are the estimate detail lines, unchanged.
+const BANNER_ROWS = 5;
 function applyMsetclHeaderBanner(ws, colCount) {
   ws['!merges'] = ws['!merges'] || [];
-  for (let r = 0; r < 4; r++) {
+  for (let r = 0; r < BANNER_ROWS; r++) {
     _mergeRowAcross(ws, r, colCount);
     const addr = XLSX.utils.encode_cell({r, c:0});
     if (!ws[addr]) ws[addr] = {t:'s', v:''};
+    const isBanner = (r === 0 || r === 1);
     ws[addr].s = {
-      font: { name:EXPORT_FONT, bold:true, italic: (r>=1 && r<=3), sz: 14, color:{rgb:'000000'} },
-      fill: r===0 ? {patternType:'solid', fgColor:{rgb:'D9DDE3'}} : undefined,
-      alignment: { horizontal: r===0?'center':'left', vertical:'center', wrapText:true },
-      border: r===3 ? {bottom:{style:'thin',color:{rgb:'000000'}}} : undefined
+      font: {
+        name: EXPORT_FONT, bold: true,
+        italic: (r >= 2 && r <= 4),
+        sz: r === 0 ? 37 : (r === 1 ? 28 : 14),
+        color: {rgb:'000000'},
+      },
+      fill: isBanner ? {patternType:'solid', fgColor:{rgb:'D9DDE3'}} : undefined,
+      alignment: { horizontal: isBanner ? 'center' : 'left', vertical:'center', wrapText:true },
+      border: r === BANNER_ROWS-1 ? {bottom:{style:'thin',color:{rgb:'000000'}}} : undefined
     };
     // heights are computed by autoRowHeights (content-based, print-ready)
   }
@@ -3708,11 +3717,14 @@ function estimateIdentity(e) {
 }
 
 // ── Header block — identical across Abstract + every section sheet ──
-function estimateHeaderRows(e, sectionPrNo) {
+function estimateHeaderRows(e, sectionPrNo, sheetLabel) {
   const division = e.division || '';
   const ident = estimateIdentity(e);
   const rows = [
     [MSETCL_HEADER_LINE1],
+    // Sheet title, e.g. "Estimate : Supply Part". Row 1 on every tab so a
+    // printed page identifies itself without needing the tab name.
+    [sheetLabel ? `Estimate : ${sheetLabel}` : ''],
     [division ? (/name of location/i.test(division) ? division : ('Name of Location : ' + division)) : ''],
     [`SCOPE OF WORK:- ${e.work || e.name || ''}`],
     [`Estimation Number: ${ident.number||'—'} , SOR Number: ${(e.sorVersions||[]).join(', ')||'—'} , Estimation Date: ${fmtDate(ident.date)||'—'}` + (sectionPrNo ? ` , PR No.: ${sectionPrNo}` : '')],
@@ -3981,7 +3993,7 @@ async function exportEstimateExcel() {
   const wb = XLSXmod.utils.book_new();
 
   // Abstract sheet: header block + Sr.1-9 table
-  const abstractHeader = estimateHeaderRows(e, '');
+  const abstractHeader = estimateHeaderRows(e, '', 'Abstract');
   const abstractTable = abstractSheetRows(false);
   // Abstract laid out across the full 12 columns (Sr in A, PARTICULARS B:K,
   // AMOUNT in L) so it aligns with the section sheets, plus a signatory footer.
@@ -4039,8 +4051,25 @@ async function exportEstimateExcel() {
     abs[ad].s.border=b; } });
   [aSig.titleRowIdx, aSig.officeRowIdx].forEach((r,idx)=>{ [0,3,7,10].forEach(c=>{ const ad=XLSXmod.utils.encode_cell({r,c}); if(abs[ad]){ abs[ad].s=Object.assign({},abs[ad].s,{font:{name:EXPORT_FONT,bold:idx===0,sz:16,color:{rgb:'000000'}},alignment:{horizontal:'center',vertical:'center',wrapText:true}}); } }); });
   applyRowStyles(abs, absStyleMap, A_COLS);
+  // Same hairline pass on the Abstract: fill only the cells that have no
+  // border yet, leaving every deliberately-styled row untouched.
+  (function gridAbstract(){
+    const HAIR = {style:'hair', color:{rgb:'000000'}};
+    const firstSigRow = aSig.titleRowIdx - 2;
+    const lastRow = XLSXmod.utils.decode_range(abs['!ref']).e.r;
+    for (let r = BANNER_ROWS; r <= lastRow; r++) {
+      if (r >= firstSigRow) continue;      // signing area stays clean
+      for (let c = 0; c < A_COLS; c++) {
+        const ad = XLSXmod.utils.encode_cell({r, c});
+        if (!abs[ad]) abs[ad] = {t:'s', v:''};
+        abs[ad].s = abs[ad].s || {};
+        if (!abs[ad].s.border) abs[ad].s.border = {top:HAIR, bottom:HAIR, left:HAIR, right:HAIR};
+      }
+    }
+  })();
+
   applyMsetclHeaderBanner(abs, A_COLS);
-  const absMins = {0:26.1, 1:26.2, 2:40.5, 3:26.2, 4:28.5};
+  const absMins = {0:69, 1:52, 2:26.2, 3:40.5, 4:26.2, 5:28.5};
   absMins[colHdrIdx] = 28.5;
   absMins[aSig.titleRowIdx] = 42; absMins[aSig.officeRowIdx] = 42;
   absMins[aSig.titleRowIdx-2] = 30; absMins[aSig.titleRowIdx-1] = 30;   // two rows above signatories, 1.5x
@@ -4090,7 +4119,7 @@ async function exportEstimateExcel() {
     const srcItems = itemsOverride || sectionConfig(key).items;
     if (!srcItems.length) return;
     const prNo = (prMatch && prMatch.number) ? prMatch.number : '';
-    const header = estimateHeaderRows(e, prNo);
+    const header = estimateHeaderRows(e, prNo, name);
     const secOpts = {noSpares: !!def.noSpares};
     let itemRows = sectionItemTableRows(key, itemsOverride, secOpts);
     if (def.remarks) itemRows = appendRemarksColumn(itemRows, srcItems);
@@ -4235,10 +4264,41 @@ async function exportEstimateExcel() {
       if(c===0) b.left=_B; if(c===N-1) b.right=_B;
       ws[ad].s.border=b; } });
     [_sig.titleRowIdx, _sig.officeRowIdx].forEach((r, idx)=>{
+      // idx 0 = designation row, idx 1 = office/work-location row. The office
+      // row is top-aligned so it hugs the designation above it rather than
+      // sitting centred in a tall row.
+      const isOffice = idx === 1;
       [0,3,7,10].forEach(c=>{ const ad=XLSXmod.utils.encode_cell({r,c}); if(ws[ad]) ws[ad].s=Object.assign({}, ws[ad].s, {
         font:{name:EXPORT_FONT, bold: idx===0, sz:16, color:{rgb:'000000'}},
-        alignment:{horizontal:'center', vertical:'center', wrapText:true} }); });
+        alignment:{horizontal:'center', vertical: isOffice ? 'top' : 'center', wrapText:true} }); });
     });
+
+    // TRIAL: hairline grid across the item table.
+    //
+    // Data rows carried no explicit border at all, so they showed only Excel's
+    // faint on-screen gridlines — which do not print. That is why the grid
+    // looked complete in some regions and broken in others: the styled rows
+    // (header / total / calc) had real borders and the item rows had none.
+    //
+    // Any cell WITHOUT a border gets a hair box; cells that already carry one
+    // are left exactly as they are, so nothing styled above is overwritten.
+    // Signature rows are excluded: they are deliberately a clean signing area.
+    (function gridItemRows(){
+      const HAIR = {style:'hair', color:{rgb:'000000'}};
+      const box  = ()=> ({top:HAIR, bottom:HAIR, left:HAIR, right:HAIR});
+      const firstSigRow = _sig.titleRowIdx - 2;
+      const lastRow = XLSXmod.utils.decode_range(ws['!ref']).e.r;
+      for (let r = 0; r <= lastRow; r++) {
+        if (r < BANNER_ROWS) continue;       // MSETCL banner block
+        if (r >= firstSigRow) continue;      // signing area
+        for (let c = 0; c < N; c++) {
+          const ad = XLSXmod.utils.encode_cell({r, c});
+          if (!ws[ad]) ws[ad] = {t:'s', v:''};
+          ws[ad].s = ws[ad].s || {};
+          if (!ws[ad].s.border) ws[ad].s.border = box();
+        }
+      }
+    })();
 
     applyMsetclHeaderBanner(ws, N);
 
@@ -4267,7 +4327,8 @@ async function exportEstimateExcel() {
 
     // ---- freeze header rows + auto row heights ----
     ws['!freeze'] = { xSplit:0, ySplit:colHdrIdx+1, topLeftCell:XLSXmod.utils.encode_cell({r:colHdrIdx+1,c:0}), activePane:'bottomLeft', state:'frozen' };
-    const secMins = {0:34.5,1:26.2,2:26.2,3:26.2}; secMins[titleIdx]=36.8; secMins[colHdrIdx]=67.5;
+    // Row 0 doubled for the 37pt company name; row 1 sized for the 28pt title.
+    const secMins = {0:69, 1:52, 2:26.2, 3:26.2, 4:26.2}; secMins[titleIdx]=36.8; secMins[colHdrIdx]=67.5;
     secMins[wordsIdx]=38.2; secMins[_sig.titleRowIdx]=48; secMins[_sig.officeRowIdx]=48;
     secMins[_sig.titleRowIdx-2]=30; secMins[_sig.titleRowIdx-1]=30;   // two rows above signatories, 1.5x
     ws['!rows'] = ws['!rows'] || [];
@@ -4286,7 +4347,7 @@ async function exportEstimateExcel() {
   // Final sheet: PMO / PR Numbers — formatted to match the approved sheet
   const filledPmoPr = pmoPrAllFilled(e);
   if (filledPmoPr.length) {
-    const header = estimateHeaderRows(e, '');
+    const header = estimateHeaderRows(e, '', 'PMO / PR Numbers');
     // Three columns, with B:C merged on every row so the Number has room to
     // print on one line. PR numbers are long (EE/400Kv/RS/DN/KARJAT/...) and
     // were wrapping inside a single 20-character column.
@@ -4309,7 +4370,7 @@ async function exportEstimateExcel() {
     applyMsetclHeaderBanner(ws, 3);
     ws['!cols'] = [{wch:75.29},{wch:20},{wch:24}];
     ws['!freeze'] = { xSplit:0, ySplit:dataStart, topLeftCell:XLSXmod.utils.encode_cell({r:dataStart,c:0}), activePane:'bottomLeft', state:'frozen' };
-    autoRowHeights(ws, 14, {0:34.5,1:26.2,2:26.2,3:26.2,[header.length]:36.8,[header.length+1]:28.5});
+    autoRowHeights(ws, 14, {0:69, 1:52, 2:26.2, 3:26.2, 4:26.2, [header.length]:36.8, [header.length+1]:28.5});
     XLSXmod.utils.book_append_sheet(wb, ws, 'PMO-PR Numbers');
   }
 
@@ -4638,8 +4699,8 @@ async function printEstimate(orientation){
   const e = ST.currentEstimate;
   const root = document.createElement('div'); root.id = 'PRINT_ROOT';
   let html = `<style>${sharedPrintCSS()}</style>`;
-  const hdr = estimateHeaderRows(e, '');
-  const hdrHtml = `<div class="print-banner" style="text-align:center;margin-bottom:8px">${hdr.map((r,i)=>`<div style="font-weight:${i===0?'800':'600'};font-size:${i===0?'15':'12'}px">${escapeHtml(String(r[0]))}</div>`).join('')}</div>`;
+  const hdr = estimateHeaderRows(e, '', 'Abstract');
+  const hdrHtml = `<div class="print-banner" style="text-align:center;margin-bottom:8px">${hdr.map((r,i)=>`<div style="font-weight:${i<=1?'800':'600'};font-size:${i===0?'22':(i===1?'17':'12')}px">${escapeHtml(String(r[0]))}</div>`).join('')}</div>`;
   const sigHtml = printSignatoryHtml(e);
   html += `<div class="pg">${hdrHtml}<h2>Abstract</h2>${printHtmlTable(abstractSheetRows(true), {rupeeCol:(i)=>i===2})}${sigHtml}</div>`;
   [['supply','Supply Material'],['project','ETC — Project Services'],['om','O&M Services'],['nonsor_supply','Non-SOR Materials'],['nonsor_om','Non-SOR Services']].forEach(([k,t])=>{
