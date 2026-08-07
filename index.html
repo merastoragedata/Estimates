@@ -8,7 +8,7 @@
 /* Build stamp. Check the live site is running this file:
    open the browser console (F12) — the build id is printed on load.
    It is also shown at the bottom-right of the login screen. */
-window.__BUILD = "2026-08-06-d";
+window.__BUILD = "2026-08-06-e";
 document.addEventListener("DOMContentLoaded", function(){
   var el = document.createElement("div");
   el.id = "build-stamp";
@@ -50,7 +50,7 @@ window.__EARLY_BOOT = (function () {
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" onload="this.onload=null;this.rel='stylesheet'">
 <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap"></noscript>
-<link rel="stylesheet" href="styles.css?v=2026-08-06-d">
+<link rel="stylesheet" href="styles.css?v=2026-08-06-e">
 </head>
 <body>
 <div id="app"></div>
@@ -3060,11 +3060,12 @@ function renderActiveTab() {
 // ── Section key → {filterFn, acKey, label, calcSection} ──
 function sectionConfig(key) {
   switch(key) {
-    case 'supply': return {items: ST.currentItems.filter(it=>!it.isCustom && it.section==='supply'), acKey:'supply', title:'Supply Material', hasAC:true, hasFI:true};
-    case 'project': return {items: ST.currentItems.filter(it=>!it.isCustom && it.section==='project'), acKey:'project', title:'Project Services (ETC Part)', hasAC:true, hasFI:false};
-    case 'om': return {items: ST.currentItems.filter(it=>!it.isCustom && it.section==='om'), acKey:null, title:'O&M Services', hasAC:false, hasFI:false};
-    case 'nonsor_supply': return {items: ST.currentItems.filter(it=>it.isCustom && it.section==='supply'), acKey:'nonsor_supply', title:'Non-SOR Materials', hasAC:true, hasFI:true};
-    case 'nonsor_om': return {items: ST.currentItems.filter(it=>it.isCustom && it.section==='om'), acKey:null, title:'Non-SOR Services', hasAC:false, hasFI:false};
+    case 'supply': return {items: ST.currentItems.filter(it=>it.section==='supply'), acKey:'supply', title:'Supply Material', hasAC:true, hasFI:true};
+    case 'project': return {items: ST.currentItems.filter(it=>it.section==='project'), acKey:'project', title:'Project Services (ETC Part)', hasAC:true, hasFI:false};
+    case 'om': return {items: ST.currentItems.filter(it=>it.section==='om'), acKey:null, title:'O&M Services', hasAC:false, hasFI:false};
+    // Reference listings only — every rupee below is already inside Supply/O&M.
+    case 'nonsor_supply': return {items: ST.currentItems.filter(it=>it.isCustom && it.section==='supply'), acKey:'supply', title:'Non-SOR Materials', hasAC:true, hasFI:true, referenceOnly:true};
+    case 'nonsor_om': return {items: ST.currentItems.filter(it=>it.isCustom && it.section==='om'), acKey:null, title:'Non-SOR Services', hasAC:false, hasFI:false, referenceOnly:true};
   }
 }
 
@@ -3226,6 +3227,11 @@ function supplySparesAmount() {
 function sectionTotalsCalc(key, itemsOverride, opts) {
   const cfg0 = sectionConfig(key);
   const cfg = itemsOverride ? Object.assign({}, cfg0, {items: itemsOverride}) : cfg0;
+  // Reference-only sections (the Non-SOR listings) are shown for visibility,
+  // never summed: their items are already counted inside Supply / O&M.
+  if (cfg.referenceOnly && !itemsOverride) {
+    return {base:0, ac:0, lc:0, fi:0, gst:0, total:0, spares:0, preSparesTotal:0, referenceOnly:true};
+  }
   let base=0, ac=0, lc=0, fi=0, gst=0, total=0;
   cfg.items.forEach(it => {
     const c = calcItem(it, effectiveRates(), cfg.acKey);
@@ -3262,8 +3268,11 @@ function computeAllSectionTotals() {
   const supply = sectionTotalsCalc('supply').total;
   const project = sectionTotalsCalc('project').total;
   const om = sectionTotalsCalc('om').total;
-  const nonSorSupply = sectionTotalsCalc('nonsor_supply').total;
-  const nonSorOm = sectionTotalsCalc('nonsor_om').total;
+  // Kept in the payload for backward compatibility with stored estimates and
+  // the abstract's Non-SOR lines, but always zero now: Non-SOR amounts live
+  // inside supply/om, exactly as ZEST03 reports them.
+  const nonSorSupply = 0;
+  const nonSorOm = 0;
   return {supply, project, om, nonSorSupply, nonSorOm};
 }
 // ══════════════════════════════════════════════════════════════
@@ -3692,14 +3701,26 @@ function pmoPrAllFilled(e) {
   return (e.pmoPrEntries||[]).filter(p=>p.label && p.label.trim() && p.number && p.number.trim());
 }
 
+// The estimate's official identity. A ZEST03 upload carries SAP's own
+// Estimation Number and Date; those outrank anything typed into the portal.
+// Number and date are resolved TOGETHER — taking the number from ZEST03 and
+// the date from the portal would put two different documents on one header.
+function estimateIdentity(e) {
+  const z = (e && e.settings && e.settings.zest03) || {};
+  const zNo = String(z.estNo||'').trim();
+  if (zNo) return { number: zNo, date: dfNormalise(z.estDate||'') || (e.date||''), source: 'zest03' };
+  return { number: String(e.number||'').trim(), date: e.date||'', source: 'portal' };
+}
+
 // ── Header block — identical across Abstract + every section sheet ──
 function estimateHeaderRows(e, sectionPrNo) {
   const division = e.division || '';
+  const ident = estimateIdentity(e);
   const rows = [
     [MSETCL_HEADER_LINE1],
     [division ? (/name of location/i.test(division) ? division : ('Name of Location : ' + division)) : ''],
     [`SCOPE OF WORK:- ${e.work || e.name || ''}`],
-    [`Estimation Number: ${e.number||'—'} , SOR Number: ${(e.sorVersions||[]).join(', ')||'—'} , Estimation Date: ${fmtDate(e.date)}` + (sectionPrNo ? ` , PR No.: ${sectionPrNo}` : '')],
+    [`Estimation Number: ${ident.number||'—'} , SOR Number: ${(e.sorVersions||[]).join(', ')||'—'} , Estimation Date: ${fmtDate(ident.date)||'—'}` + (sectionPrNo ? ` , PR No.: ${sectionPrNo}` : '')],
   ];
   return rows;
 }
@@ -8401,6 +8422,7 @@ function feBuildSyntheticEstimate(){
     est = {
       id:'', name:(m.estFor||b.name||('Final Estimate '+(m.estNo||''))).slice(0,120),
       number:m.estNo||b.number||'', date:dfNormalise(m.estDate||b.date||''),
+      settings:Object.assign({}, b.settings, {zest03:{estNo:m.estNo||'', estDate:dfNormalise(m.estDate)}}),
       division:b.division||'', work:m.estFor||b.work||'', sorVersions:m.sor?[m.sor]:(b.sorVersions||[]),
       estimateType:b.estimateType||'project', amcAmount:0, finalTotal:0,
       addCharge:b.addCharge||{}, settings:b.settings||{}, pmoPrEntries:[], progressImages:[],
@@ -8409,6 +8431,7 @@ function feBuildSyntheticEstimate(){
   } else {
     est = {
       id:'', name:(m.estFor||('Final Estimate '+(m.estNo||''))).slice(0,120), number:m.estNo||'', date:dfNormalise(m.estDate),
+      settings:{zest03:{estNo:m.estNo||'', estDate:dfNormalise(m.estDate)}},
       division:FE.division||'', work:m.estFor||'', sorVersions:m.sor?[m.sor]:[],
       estimateType:FE.estimateType, amcAmount:0, finalTotal:0,
       addCharge:{ supply:FE.acSupply?'yes':'no', project:FE.acProject?'yes':'no', nonsor_supply:'no' },
