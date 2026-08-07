@@ -8,7 +8,7 @@
 /* Build stamp. Check the live site is running this file:
    open the browser console (F12) — the build id is printed on load.
    It is also shown at the bottom-right of the login screen. */
-window.__BUILD = "2026-08-06-q";
+window.__BUILD = "2026-08-06-r";
 document.addEventListener("DOMContentLoaded", function(){
   var el = document.createElement("div");
   el.id = "build-stamp";
@@ -50,7 +50,7 @@ window.__EARLY_BOOT = (function () {
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" onload="this.onload=null;this.rel='stylesheet'">
 <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap"></noscript>
-<link rel="stylesheet" href="styles.css?v=2026-08-06-q">
+<link rel="stylesheet" href="styles.css?v=2026-08-06-r">
 </head>
 <body>
 <div id="app"></div>
@@ -4632,6 +4632,7 @@ function estimatePdfContent(e){
 
   // ── Section sheets, in workbook order, one per page ──
   estimateSheetDefs(e).forEach(def=>{
+   try {
     const itemsOverride = def.items || null;
     const srcItems = itemsOverride || sectionConfig(def.key).items;
     if (!srcItems.length) return;
@@ -4701,6 +4702,12 @@ function estimatePdfContent(e){
       fs:FS,
     }));
     content.push(pdfSignatoryNode(e, {skipFirst: !!def.skipFirstSig}));
+   } catch(err) {
+     console.error('PDF sheet failed:', def.name, err);
+     content.push({ text:'', pageBreak:'before' });
+     content.push({ text:'Could not render sheet: '+pdfText(def.name)+' — '+pdfText(err&&err.message||'error'),
+                    color:'#b3261e', fontSize:10, bold:true });
+   }
   });
 
   // ── PMO / PR Numbers, the workbook's last tab ──
@@ -4722,7 +4729,7 @@ function pdfSignatoryNode(e, opts){
   sig = sig.filter(s=>!s.hidden);
   if (!sig.length) return { text:'' };
   return {
-    margin:[0,26,0,0], unbreakable:true,
+    margin:[0,26,0,0],
     columns: sig.map(s=>({
       width:'*', alignment:'center', stack:[
         { text:pdfText(s.title||''), bold:true, fontSize:8.5 },
@@ -4941,7 +4948,10 @@ async function exportEstimatePDF(){
     toast('PDF downloaded','ok');
   } catch(err) {
     console.error('exportEstimatePDF failed:', err);
-    toast('PDF failed: '+(err&&err.message||'unknown error')+' — check console for details','err',7000);
+    // Show where it broke, not just that it broke. The message is the first
+    // thing needed to fix it and was previously buried in the console.
+    const where = (err && err.stack ? String(err.stack).split('\n')[1] || '' : '').trim();
+    toast('PDF failed: '+(err&&err.message||'unknown error')+(where?'  ['+where.slice(0,80)+']':''),'err',12000);
   }
 }
 
