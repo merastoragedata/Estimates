@@ -8,7 +8,7 @@
 /* Build stamp. Check the live site is running this file:
    open the browser console (F12) — the build id is printed on load.
    It is also shown at the bottom-right of the login screen. */
-window.__BUILD = "2026-08-06-f";
+window.__BUILD = "2026-08-06-h";
 document.addEventListener("DOMContentLoaded", function(){
   var el = document.createElement("div");
   el.id = "build-stamp";
@@ -50,7 +50,7 @@ window.__EARLY_BOOT = (function () {
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" onload="this.onload=null;this.rel='stylesheet'">
 <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap"></noscript>
-<link rel="stylesheet" href="styles.css?v=2026-08-06-f">
+<link rel="stylesheet" href="styles.css?v=2026-08-06-h">
 </head>
 <body>
 <div id="app"></div>
@@ -1773,18 +1773,61 @@ function setRowHeight(ws, rowIdx, pts) {
 // the following 3 header lines (division/scope/estimation no.) centered
 // and bold but smaller. colCount must match the sheet's actual width so
 // the merge spans correctly regardless of how many columns the sheet has. ──
-function applyMsetclHeaderBanner(ws, colCount) {
+function applyMsetclHeaderBanner(ws, colCount, opts) {
   ws['!merges'] = ws['!merges'] || [];
+  const EDGE = { style:'thin', color:{rgb:'000000'} };
+  // Every header row now carries a full box. Previously only row 3 had a
+  // bottom rule and the rest had no border at all, which is why the grid
+  // looked broken above the item table — the lines simply stopped.
+  const BOX = { top:EDGE, bottom:EDGE, left:EDGE, right:EDGE };
+
+  // Which rows are label/value pairs. The label block is narrow and bold; the
+  // value block takes the rest of the width and stays normal.
+  const pairRows = (opts && opts.pairRows) || [];
+  // Label width scales with the sheet: wide enough for "Name of Location :"
+  // on a 12-column section sheet, but never more than half a narrow sheet.
+  const labelSpan = Math.max(1, Math.min(2, Math.floor(colCount/2)));
+
   for (let r = 0; r < 4; r++) {
-    _mergeRowAcross(ws, r, colCount);
-    const addr = XLSX.utils.encode_cell({r, c:0});
-    if (!ws[addr]) ws[addr] = {t:'s', v:''};
-    ws[addr].s = {
-      font: { name:EXPORT_FONT, bold:true, italic: (r>=1 && r<=3), sz: 14, color:{rgb:'000000'} },
+    const isPair = pairRows.indexOf(r) > -1 && colCount > labelSpan;
+    const base = {
       fill: r===0 ? {patternType:'solid', fgColor:{rgb:'D9DDE3'}} : undefined,
       alignment: { horizontal: r===0?'center':'left', vertical:'center', wrapText:true },
-      border: r===3 ? {bottom:{style:'thin',color:{rgb:'000000'}}} : undefined
+      border: BOX,
     };
+
+    if (isPair) {
+      // Two merged blocks on one row: label then value.
+      ws['!merges'].push({s:{r,c:0}, e:{r,c:labelSpan-1}});
+      ws['!merges'].push({s:{r,c:labelSpan}, e:{r,c:colCount-1}});
+      const la = XLSX.utils.encode_cell({r, c:0});
+      const va = XLSX.utils.encode_cell({r, c:labelSpan});
+      if (!ws[la]) ws[la] = {t:'s', v:''};
+      if (!ws[va]) ws[va] = {t:'s', v:''};
+      ws[la].s = Object.assign({}, base, {
+        font: { name:EXPORT_FONT, bold:true,  sz:14, color:{rgb:'000000'} },
+        alignment: Object.assign({}, base.alignment),
+        border: Object.assign({}, BOX),
+      });
+      ws[va].s = Object.assign({}, base, {
+        font: { name:EXPORT_FONT, bold:false, sz:14, color:{rgb:'000000'} },
+        alignment: Object.assign({}, base.alignment),
+        border: Object.assign({}, BOX),
+      });
+      // The two blocks read as one line, so drop the rule between them.
+      ws[la].s.border.right = undefined;
+      ws[va].s.border.left  = undefined;
+    } else {
+      _mergeRowAcross(ws, r, colCount);
+      const addr = XLSX.utils.encode_cell({r, c:0});
+      if (!ws[addr]) ws[addr] = {t:'s', v:''};
+      ws[addr].s = {
+        font: { name:EXPORT_FONT, bold:true, italic: (r>=1 && r<=3), sz:14, color:{rgb:'000000'} },
+        fill: base.fill,
+        alignment: base.alignment,
+        border: Object.assign({}, BOX),
+      };
+    }
     // heights are computed by autoRowHeights (content-based, print-ready)
   }
 }
@@ -2688,6 +2731,10 @@ function openNonSORBulkModal(context){
     <div id="ns-bulk-status" class="text-sm mt-2"></div>
   `);
 }
+
+// Remarks lookup used by the Excel writers. Exposed so any export path can
+// guarantee the catalog is present before it builds a sheet.
+async function ensureRemarksSource(){ try { await ensureNonSorLoaded(); } catch(e){} }
 
 async function nonSorTemplateDownload(){
   try {
@@ -3707,12 +3754,25 @@ function estimateIdentity(e) {
 function estimateHeaderRows(e, sectionPrNo) {
   const division = e.division || '';
   const ident = estimateIdentity(e);
+  // Label and value go in SEPARATE cells so the label can be bold while the
+  // value stays normal. A single string could not do this: Excel styles whole
+  // cells, and rich-text runs are not reliably written by the export library.
+  // applyMsetclHeaderBanner merges each pair back into two blocks, so the row
+  // still reads as one continuous line.
+  const locLabel = 'Name of Location :';
+  const locValue = division
+    ? (/name of location/i.test(division) ? division.replace(/^\s*name of location\s*:?-?\s*/i,'') : division)
+    : '';
   const rows = [
     [MSETCL_HEADER_LINE1],
-    [division ? (/name of location/i.test(division) ? division : ('Name of Location : ' + division)) : ''],
-    [`SCOPE OF WORK:- ${e.work || e.name || ''}`],
+    division ? [locLabel, locValue] : [''],
+    ['SCOPE OF WORK :-', e.work || e.name || ''],
     [`Estimation Number: ${ident.number||'—'} , SOR Number: ${(e.sorVersions||[]).join(', ')||'—'} , Estimation Date: ${fmtDate(ident.date)||'—'}` + (sectionPrNo ? ` , PR No.: ${sectionPrNo}` : '')],
   ];
+  // Rows 1 and 2 are label/value pairs; row 3 stays a single run because it
+  // packs four fields onto one line and splitting it would depend on the
+  // sheet's column count.
+  rows.__pairRows = [1, 2];
   return rows;
 }
 // Approval signatories that print at the bottom of every estimate sheet.
@@ -3969,6 +4029,12 @@ async function exportEstimateExcel() {
   const e = ST.currentEstimate;
   e.pmoPrEntries = e.pmoPrEntries || [];
   toast('Building Excel…', 'ok', 1800);
+  // The Non-SOR sheets take their Remarks straight from the Non-SOR catalog
+  // (that is where the PO references live). Under lite boot the catalog is
+  // only fetched when a page needs it, so exporting from an estimate without
+  // ever opening Rates left ST.nonSorCache empty and every Remark blank.
+  // Loading it here is a no-op once it is already in memory.
+  await ensureNonSorLoaded();
   const XLSXmod = await ensureSheetJS();
   const wb = XLSXmod.utils.book_new();
 
@@ -4031,7 +4097,7 @@ async function exportEstimateExcel() {
     abs[ad].s.border=b; } });
   [aSig.titleRowIdx, aSig.officeRowIdx].forEach((r,idx)=>{ [0,3,7,10].forEach(c=>{ const ad=XLSXmod.utils.encode_cell({r,c}); if(abs[ad]){ abs[ad].s=Object.assign({},abs[ad].s,{font:{name:EXPORT_FONT,bold:idx===0,sz:16,color:{rgb:'000000'}},alignment:{horizontal:'center',vertical:'center',wrapText:true}}); } }); });
   applyRowStyles(abs, absStyleMap, A_COLS);
-  applyMsetclHeaderBanner(abs, A_COLS);
+  applyMsetclHeaderBanner(abs, A_COLS, {pairRows: abstractHeader.__pairRows});
   const absMins = {0:26.1, 1:26.2, 2:40.5, 3:26.2, 4:28.5};
   absMins[colHdrIdx] = 28.5;
   absMins[aSig.titleRowIdx] = 42; absMins[aSig.officeRowIdx] = 42;
@@ -4232,7 +4298,7 @@ async function exportEstimateExcel() {
         alignment:{horizontal:'center', vertical:'center', wrapText:true} }); });
     });
 
-    applyMsetclHeaderBanner(ws, N);
+    applyMsetclHeaderBanner(ws, N, {pairRows: header.__pairRows});
 
     // ---- widths (content-fitted; amount cols sized to formatted value, no ###) ----
     applySmartColWidths(ws, rows);
@@ -8829,8 +8895,10 @@ async function feWithSyntheticAsync(fn){
   catch(err){ console.error('Final Estimate export failed:', err); toast('Export failed: '+(err.message||'error'),'err',7000); }
   finally { ST.currentEstimate = savedE; ST.currentItems = savedI; ST.chargeRates = savedR; FE.attachRaw = false; }
 }
-async function feDownloadExcel(){ await feWithSyntheticAsync(()=> exportEstimateExcel()); }
-async function feDownloadPDF(){ await feWithSyntheticAsync(()=> exportEstimatePDF()); }
+// Fetch the Non-SOR catalog BEFORE the synthetic-estimate swap, so no network
+// wait happens while ST.currentItems is temporarily replaced.
+async function feDownloadExcel(){ await ensureRemarksSource(); await feWithSyntheticAsync(()=> exportEstimateExcel()); }
+async function feDownloadPDF(){ await ensureRemarksSource(); await feWithSyntheticAsync(()=> exportEstimatePDF()); }
 async function feDownloadRawZest(){
   if (!FE.rawGrid) { toast('No uploaded ZEST03 sheet is stored for this estimate.','warn'); return; }
   try {
