@@ -1368,6 +1368,17 @@ body::after{
   background:#FFF8DC !important; -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
 
 
+/* ZEST03 preview — total rows.
+   The label and its amount are the two things read off these rows, so both
+   step up two points. The label also spans four columns (set in markup) so it
+   never wraps. */
+.fe-preview tbody tr.fe-total td.fe-total-title{
+  font-size:calc(1em + 2pt); font-weight:600; white-space:nowrap; text-align:left;
+}
+.fe-preview tbody tr.fe-total td.fe-total-amt{
+  font-size:calc(1em + 2pt); font-weight:800; white-space:nowrap;
+}
+
 .ok-text{ color:var(--ok-500,#0f7b45); font-weight:600; }
 
 /* ── Build stamp ────────────────────────────────────────────────────────

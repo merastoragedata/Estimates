@@ -8,7 +8,7 @@
 /* Build stamp. Check the live site is running this file:
    open the browser console (F12) — the build id is printed on load.
    It is also shown at the bottom-right of the login screen. */
-window.__BUILD = "2026-08-06-h";
+window.__BUILD = "2026-08-06-i";
 document.addEventListener("DOMContentLoaded", function(){
   var el = document.createElement("div");
   el.id = "build-stamp";
@@ -50,7 +50,7 @@ window.__EARLY_BOOT = (function () {
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" onload="this.onload=null;this.rel='stylesheet'">
 <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap"></noscript>
-<link rel="stylesheet" href="styles.css?v=2026-08-06-h">
+<link rel="stylesheet" href="styles.css?v=2026-08-06-i">
 </head>
 <body>
 <div id="app"></div>
@@ -1773,61 +1773,18 @@ function setRowHeight(ws, rowIdx, pts) {
 // the following 3 header lines (division/scope/estimation no.) centered
 // and bold but smaller. colCount must match the sheet's actual width so
 // the merge spans correctly regardless of how many columns the sheet has. ──
-function applyMsetclHeaderBanner(ws, colCount, opts) {
+function applyMsetclHeaderBanner(ws, colCount) {
   ws['!merges'] = ws['!merges'] || [];
-  const EDGE = { style:'thin', color:{rgb:'000000'} };
-  // Every header row now carries a full box. Previously only row 3 had a
-  // bottom rule and the rest had no border at all, which is why the grid
-  // looked broken above the item table — the lines simply stopped.
-  const BOX = { top:EDGE, bottom:EDGE, left:EDGE, right:EDGE };
-
-  // Which rows are label/value pairs. The label block is narrow and bold; the
-  // value block takes the rest of the width and stays normal.
-  const pairRows = (opts && opts.pairRows) || [];
-  // Label width scales with the sheet: wide enough for "Name of Location :"
-  // on a 12-column section sheet, but never more than half a narrow sheet.
-  const labelSpan = Math.max(1, Math.min(2, Math.floor(colCount/2)));
-
   for (let r = 0; r < 4; r++) {
-    const isPair = pairRows.indexOf(r) > -1 && colCount > labelSpan;
-    const base = {
+    _mergeRowAcross(ws, r, colCount);
+    const addr = XLSX.utils.encode_cell({r, c:0});
+    if (!ws[addr]) ws[addr] = {t:'s', v:''};
+    ws[addr].s = {
+      font: { name:EXPORT_FONT, bold:true, italic: (r>=1 && r<=3), sz: 14, color:{rgb:'000000'} },
       fill: r===0 ? {patternType:'solid', fgColor:{rgb:'D9DDE3'}} : undefined,
       alignment: { horizontal: r===0?'center':'left', vertical:'center', wrapText:true },
-      border: BOX,
+      border: r===3 ? {bottom:{style:'thin',color:{rgb:'000000'}}} : undefined
     };
-
-    if (isPair) {
-      // Two merged blocks on one row: label then value.
-      ws['!merges'].push({s:{r,c:0}, e:{r,c:labelSpan-1}});
-      ws['!merges'].push({s:{r,c:labelSpan}, e:{r,c:colCount-1}});
-      const la = XLSX.utils.encode_cell({r, c:0});
-      const va = XLSX.utils.encode_cell({r, c:labelSpan});
-      if (!ws[la]) ws[la] = {t:'s', v:''};
-      if (!ws[va]) ws[va] = {t:'s', v:''};
-      ws[la].s = Object.assign({}, base, {
-        font: { name:EXPORT_FONT, bold:true,  sz:14, color:{rgb:'000000'} },
-        alignment: Object.assign({}, base.alignment),
-        border: Object.assign({}, BOX),
-      });
-      ws[va].s = Object.assign({}, base, {
-        font: { name:EXPORT_FONT, bold:false, sz:14, color:{rgb:'000000'} },
-        alignment: Object.assign({}, base.alignment),
-        border: Object.assign({}, BOX),
-      });
-      // The two blocks read as one line, so drop the rule between them.
-      ws[la].s.border.right = undefined;
-      ws[va].s.border.left  = undefined;
-    } else {
-      _mergeRowAcross(ws, r, colCount);
-      const addr = XLSX.utils.encode_cell({r, c:0});
-      if (!ws[addr]) ws[addr] = {t:'s', v:''};
-      ws[addr].s = {
-        font: { name:EXPORT_FONT, bold:true, italic: (r>=1 && r<=3), sz:14, color:{rgb:'000000'} },
-        fill: base.fill,
-        alignment: base.alignment,
-        border: Object.assign({}, BOX),
-      };
-    }
     // heights are computed by autoRowHeights (content-based, print-ready)
   }
 }
@@ -3754,25 +3711,12 @@ function estimateIdentity(e) {
 function estimateHeaderRows(e, sectionPrNo) {
   const division = e.division || '';
   const ident = estimateIdentity(e);
-  // Label and value go in SEPARATE cells so the label can be bold while the
-  // value stays normal. A single string could not do this: Excel styles whole
-  // cells, and rich-text runs are not reliably written by the export library.
-  // applyMsetclHeaderBanner merges each pair back into two blocks, so the row
-  // still reads as one continuous line.
-  const locLabel = 'Name of Location :';
-  const locValue = division
-    ? (/name of location/i.test(division) ? division.replace(/^\s*name of location\s*:?-?\s*/i,'') : division)
-    : '';
   const rows = [
     [MSETCL_HEADER_LINE1],
-    division ? [locLabel, locValue] : [''],
-    ['SCOPE OF WORK :-', e.work || e.name || ''],
+    [division ? (/name of location/i.test(division) ? division : ('Name of Location : ' + division)) : ''],
+    [`SCOPE OF WORK:- ${e.work || e.name || ''}`],
     [`Estimation Number: ${ident.number||'—'} , SOR Number: ${(e.sorVersions||[]).join(', ')||'—'} , Estimation Date: ${fmtDate(ident.date)||'—'}` + (sectionPrNo ? ` , PR No.: ${sectionPrNo}` : '')],
   ];
-  // Rows 1 and 2 are label/value pairs; row 3 stays a single run because it
-  // packs four fields onto one line and splitting it would depend on the
-  // sheet's column count.
-  rows.__pairRows = [1, 2];
   return rows;
 }
 // Approval signatories that print at the bottom of every estimate sheet.
@@ -3889,10 +3833,8 @@ function sectionItemTableRows(key, itemsOverride, opts) {
     sum.fi+=c.fi; sum.exFi+=c.base+c.ac+c.lc+c.fi;
     sum.gst+=c.gst; sum.total+=c.total;
   });
-  // noTotals: build the item table and stop. Used by the ZEST03 preview's
-  // Non-SOR listings, which exist to show WHICH items are Non-SOR. Their
-  // amounts are already counted inside Supply / O&M, so appending a TOTAL and
-  // charge block here would invite double counting.
+  // noTotals: build the item table and stop. Kept as a general capability for
+  // any caller that wants a listing without a total block.
   if (cfg.items.length && !(opts && opts.noTotals)) {
     // TOTAL row — placed precisely under each column whatever columns exist
     const D = hasFull ? 1 : 0;          // rightward shift caused by Full Description
@@ -4097,7 +4039,7 @@ async function exportEstimateExcel() {
     abs[ad].s.border=b; } });
   [aSig.titleRowIdx, aSig.officeRowIdx].forEach((r,idx)=>{ [0,3,7,10].forEach(c=>{ const ad=XLSXmod.utils.encode_cell({r,c}); if(abs[ad]){ abs[ad].s=Object.assign({},abs[ad].s,{font:{name:EXPORT_FONT,bold:idx===0,sz:16,color:{rgb:'000000'}},alignment:{horizontal:'center',vertical:'center',wrapText:true}}); } }); });
   applyRowStyles(abs, absStyleMap, A_COLS);
-  applyMsetclHeaderBanner(abs, A_COLS, {pairRows: abstractHeader.__pairRows});
+  applyMsetclHeaderBanner(abs, A_COLS);
   const absMins = {0:26.1, 1:26.2, 2:40.5, 3:26.2, 4:28.5};
   absMins[colHdrIdx] = 28.5;
   absMins[aSig.titleRowIdx] = 42; absMins[aSig.officeRowIdx] = 42;
@@ -4298,7 +4240,7 @@ async function exportEstimateExcel() {
         alignment:{horizontal:'center', vertical:'center', wrapText:true} }); });
     });
 
-    applyMsetclHeaderBanner(ws, N, {pairRows: header.__pairRows});
+    applyMsetclHeaderBanner(ws, N);
 
     // ---- widths (content-fitted; amount cols sized to formatted value, no ###) ----
     applySmartColWidths(ws, rows);
@@ -4345,21 +4287,27 @@ async function exportEstimateExcel() {
   const filledPmoPr = pmoPrAllFilled(e);
   if (filledPmoPr.length) {
     const header = estimateHeaderRows(e, '');
-    const rows = header.concat([['PMO / PR Numbers']], [['Label','Number']], filledPmoPr.map(p=>[p.label, p.number]));
+    // Three columns, with B:C merged on every row so the Number has room to
+    // print on one line. PR numbers are long (EE/400Kv/RS/DN/KARJAT/...) and
+    // were wrapping inside a single 20-character column.
+    const rows = header.concat([['PMO / PR Numbers']], [['Label','Number','']], filledPmoPr.map(p=>[p.label, p.number, '']));
     const ws = XLSXmod.utils.aoa_to_sheet(rows);
     ws['!noZebra'] = true;
     const styleMap = {};
     styleMap[header.length] = 'section';
     styleMap[header.length+1] = 'header';
-    applyRowStyles(ws, styleMap, 2);
+    applyRowStyles(ws, styleMap, 3);
     { const ad=XLSXmod.utils.encode_cell({r:header.length,c:0}); if(ws[ad]) ws[ad].s=Object.assign({}, XLSX_STYLES.section); }
     // zebra on alternate data rows
     const dataStart = header.length+2;
     for (let i=dataStart; i<rows.length; i++){
-      if ((i-dataStart)%2===1) for (let c=0;c<2;c++){ const ad=XLSXmod.utils.encode_cell({r:i,c}); if(ws[ad]){ ws[ad].s=ws[ad].s||{}; ws[ad].s.fill={patternType:'solid',fgColor:{rgb:'F4F7FC'}}; } }
+      if ((i-dataStart)%2===1) for (let c=0;c<3;c++){ const ad=XLSXmod.utils.encode_cell({r:i,c}); if(ws[ad]){ ws[ad].s=ws[ad].s||{}; ws[ad].s.fill={patternType:'solid',fgColor:{rgb:'F4F7FC'}}; } }
     }
-    applyMsetclHeaderBanner(ws, 2);
-    ws['!cols'] = [{wch:75.29},{wch:20}];
+    // Merge B:C on the column-header row and every data row.
+    ws['!merges'] = ws['!merges'] || [];
+    for (let i = header.length+1; i < rows.length; i++) ws['!merges'].push({s:{r:i,c:1}, e:{r:i,c:2}});
+    applyMsetclHeaderBanner(ws, 3);
+    ws['!cols'] = [{wch:75.29},{wch:20},{wch:24}];
     ws['!freeze'] = { xSplit:0, ySplit:dataStart, topLeftCell:XLSXmod.utils.encode_cell({r:dataStart,c:0}), activePane:'bottomLeft', state:'frozen' };
     autoRowHeights(ws, 14, {0:34.5,1:26.2,2:26.2,3:26.2,[header.length]:36.8,[header.length+1]:28.5});
     XLSXmod.utils.book_append_sheet(wb, ws, 'PMO-PR Numbers');
@@ -8801,8 +8749,8 @@ function renderFinalEstimateResult(){
   // list ALL items of their part, and their totals are the real ones.
   //
   // The Non-SOR sections below are a reading aid — "which of these are
-  // Non-SOR?" — so they are listed WITHOUT totals (noTotals). Their amounts are
-  // already inside Supply and O&M, and totalling them again would double count.
+  // Non-SOR, and what are they worth?". They show their own totals, but those
+  // figures feed nothing: the same amounts are already inside Supply and O&M.
   const secRows = feWithSynthetic(()=>{
     const all = (sec)=> (ST.currentItems||[]).filter(it=> it.section===sec);
     const nonSor = (sec)=> (ST.currentItems||[]).filter(it=> it.isCustom && it.section===sec);
@@ -8814,8 +8762,11 @@ function renderFinalEstimateResult(){
       supply:  build('supply',  all('supply')),
       project: build('project', all('project')),
       om:      build('om',      all('om')),
-      nonsor_supply: build('supply', nonSor('supply'), {noTotals:true, noSpares:true}),
-      nonsor_om:     build('om',     nonSor('om'),     {noTotals:true}),
+      // These carry their own totals so the Non-SOR value is visible at a
+      // glance. Nothing downstream reads them: the same amounts are already
+      // inside the Supply / O&M totals above.
+      nonsor_supply: build('supply', nonSor('supply'), {noSpares:true}),
+      nonsor_om:     build('om',     nonSor('om')),
     };
   });
   const secTbl = (secKey, rows) => {
@@ -8836,6 +8787,21 @@ function renderFinalEstimateResult(){
         // bold, the way it reads on the official sheet. Exports are untouched.
         const isWords = typeof r[2]==='string' && /in Words:/i.test(r[2]);
         if (isWords) return `<tr class="fe-words-row"><td class="fe-words" colspan="${N}">${escapeHtml(String(r[2]))}</td></tr>`;
+        // TOTAL / Supply Spares / Supply Part Total: the label is long and was
+        // wrapping inside one narrow Description cell. Span it across the next
+        // three columns — they are empty on these rows anyway — so it sits on
+        // one line. Guarded on width so narrower sheets fall back safely.
+        if (isTot && N > 6) {
+          const cells = [];
+          for (let i = 0; i < r.length; i++) {
+            if (i >= 3 && i <= 5) continue;            // absorbed by the colspan
+            const c = r[i];
+            if (i === 2) { cells.push(`<td class="fe-total-title" colspan="4">${escapeHtml(String(c))}</td>`); continue; }
+            const isNum = typeof c === 'number';
+            cells.push(`<td class="${isNum?'num-cell fe-total-amt':''}${dcls(i)}">${isNum?((i>=amt0?'₹':'')+fmtNum(c)):escapeHtml(String(c))}</td>`);
+          }
+          return `<tr class="fe-total">${cells.join('')}</tr>`;
+        }
         return `<tr class="${isTot?'fe-total':''}${isNonSorRow?' fe-nonsor':''}">${r.map((c,i)=>`<td class="${typeof c==='number'?'num-cell':''}${dcls(i)}">${typeof c==='number'?((i>=amt0?'₹':'')+fmtNum(c)):escapeHtml(String(c))}</td>`).join('')}</tr>`;
       }).join('')}</tbody></table></div>`;
   };
@@ -8864,8 +8830,8 @@ function renderFinalEstimateResult(){
     ['supply',        'Supply Material',        'supply', true ],
     ['project',       'ETC — Project Services', 'project', true ],
     ['om',            'O&M Services',           'om',      true ],
-    ['nonsor_supply', 'Non-SOR Materials (listed above, not totalled)', 'supply', false],
-    ['nonsor_om',     'Non-SOR Services (listed above, not totalled)',  'om',     false],
+    ['nonsor_supply', 'Non-SOR Materials (listed above, total not to be counted as it is already considered in Supply Material)', 'supply', false],
+    ['nonsor_om',     'Non-SOR Services (listed above, total not to be counted as it is already considered in O&M Services)',      'om',     false],
   ];
   FE_SECTIONS.forEach(([key, title, prKey, alwaysShow])=>{
     const sec = secRows[key] || {rows:null, count:0};
