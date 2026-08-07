@@ -8,7 +8,7 @@
 /* Build stamp. Check the live site is running this file:
    open the browser console (F12) — the build id is printed on load.
    It is also shown at the bottom-right of the login screen. */
-window.__BUILD = "2026-08-06-k";
+window.__BUILD = "2026-08-06-n";
 document.addEventListener("DOMContentLoaded", function(){
   var el = document.createElement("div");
   el.id = "build-stamp";
@@ -50,7 +50,7 @@ window.__EARLY_BOOT = (function () {
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" onload="this.onload=null;this.rel='stylesheet'">
 <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap"></noscript>
-<link rel="stylesheet" href="styles.css?v=2026-08-06-k">
+<link rel="stylesheet" href="styles.css?v=2026-08-06-n">
 </head>
 <body>
 <div id="app"></div>
@@ -1787,7 +1787,7 @@ function applyMsetclHeaderBanner(ws, colCount) {
       font: {
         name: EXPORT_FONT, bold: true,
         italic: (r >= 2 && r <= 4),
-        sz: r === 0 ? 37 : (r === 1 ? 28 : 14),
+        sz: r === 0 ? 30 : (r === 1 ? 28 : 14),
         color: {rgb:'000000'},
       },
       fill: isBanner ? {patternType:'solid', fgColor:{rgb:'D9DDE3'}} : undefined,
@@ -3979,6 +3979,26 @@ function abstractSheetRows(includeBreakdown=false) {
   return rows.concat(abstractPmoPrRows(e));
 }
 
+// ── The single source of truth for which sheets an estimate produces and
+// what goes on each one. Excel and Print both read this, so the printed
+// document is the workbook minus the ZEST03 tab — never a second, drifting
+// implementation of the same thing. ──
+function estimateSheetDefs(e) {
+  const _pr = pmoPrResolve(e);
+  const _isNonSor = (it)=> !!(it.isCustom || it.version === 'NONSOR');
+  const _gather = (keys)=> keys.reduce((acc,k)=> acc.concat(sectionConfig(k).items.filter(_isNonSor)), []);
+  const _merge  = (keys)=> keys.reduce((acc,k)=> acc.concat(sectionConfig(k).items), []);
+  return [
+    {key:'supply',  name:'Supply  Material', pr:_pr.supply,  items:_merge(['supply','nonsor_supply'])},
+    {key:'project', name:'ETC Part',         pr:_pr.project},
+    {key:'om',      name:'Services Part',    pr:_pr.om,      items:_merge(['om','nonsor_om'])},
+    {key:'supply',  name:'Non SOR Materials', pr:_pr.supply, items:_gather(['supply','nonsor_supply']),
+     remarks:true, noHighlight:true, skipFirstSig:true, noSpares:true},
+    {key:'om',      name:'Non SOR Services',  pr:_pr.om,     items:_gather(['om','project','nonsor_om']),
+     remarks:true, noHighlight:true, skipFirstSig:true, noSpares:true},
+  ];
+}
+
 async function exportEstimateExcel() {
   const e = ST.currentEstimate;
   e.pmoPrEntries = e.pmoPrEntries || [];
@@ -4049,7 +4069,10 @@ async function exportEstimateExcel() {
     if(r===aSigRows[0]) b.top=_aB; if(r===aSig.officeRowIdx) b.bottom=_aB;
     if(c===0) b.left=_aB; if(c===A_COLS-1) b.right=_aB;
     abs[ad].s.border=b; } });
-  [aSig.titleRowIdx, aSig.officeRowIdx].forEach((r,idx)=>{ [0,3,7,10].forEach(c=>{ const ad=XLSXmod.utils.encode_cell({r,c}); if(abs[ad]){ abs[ad].s=Object.assign({},abs[ad].s,{font:{name:EXPORT_FONT,bold:idx===0,sz:16,color:{rgb:'000000'}},alignment:{horizontal:'center',vertical:'center',wrapText:true}}); } }); });
+  // idx 0 = designation, idx 1 = office / work location. The office row is
+  // top-aligned so it sits directly under the designation instead of floating
+  // in the middle of a tall signing row. Must match the section sheets.
+  [aSig.titleRowIdx, aSig.officeRowIdx].forEach((r,idx)=>{ [0,3,7,10].forEach(c=>{ const ad=XLSXmod.utils.encode_cell({r,c}); if(abs[ad]){ abs[ad].s=Object.assign({},abs[ad].s,{font:{name:EXPORT_FONT,bold:idx===0,sz:16,color:{rgb:'000000'}},alignment:{horizontal:'center',vertical: idx===1 ? 'top' : 'center',wrapText:true}}); } }); });
   applyRowStyles(abs, absStyleMap, A_COLS);
   // Same hairline pass on the Abstract: fill only the cells that have no
   // border yet, leaving every deliberately-styled row untouched.
@@ -4069,7 +4092,7 @@ async function exportEstimateExcel() {
   })();
 
   applyMsetclHeaderBanner(abs, A_COLS);
-  const absMins = {0:69, 1:52, 2:26.2, 3:40.5, 4:26.2, 5:28.5};
+  const absMins = {0:42, 1:39, 2:26.2, 3:40.5, 4:26.2, 5:28.5};
   absMins[colHdrIdx] = 28.5;
   absMins[aSig.titleRowIdx] = 42; absMins[aSig.officeRowIdx] = 42;
   absMins[aSig.titleRowIdx-2] = 30; absMins[aSig.titleRowIdx-1] = 30;   // two rows above signatories, 1.5x
@@ -4083,36 +4106,7 @@ async function exportEstimateExcel() {
   // top, so the label "Project Services PR" (it contains "service") would be
   // picked for the O&M sheet and that sheet would print the ETC PR number.
   const _pr = pmoPrResolve(e);
-  // Non-SOR entries live inline in supply/project/om on a ZEST03 estimate and
-  // in nonsor_* on a regular one — collect from both.
-  const _isNonSor = (it)=> !!(it.isCustom || it.version === 'NONSOR');
-  const _gather = (keys)=> keys.reduce((acc,k)=> acc.concat(sectionConfig(k).items.filter(_isNonSor)), []);
-  const nsMaterials = _gather(['supply','nonsor_supply']);
-  const nsServices  = _gather(['om','project','nonsor_om']);
-
-  // The Non-SOR sheets are EXACT copies of the Supply / O&M sheets — same
-  // builder, same styling, same totals block — differing only by: their own
-  // item subset, one extra Remarks column, three signatories instead of four
-  // (they are audited separately before the main sheets are signed), and no
-  // yellow highlight (the highlight exists to separate Non-SOR from SOR inside
-  // the Supply / O&M sheets; on a sheet that is entirely Non-SOR it is noise).
-  // Supply and O&M each carry their SOR items AND their Non-SOR items together,
-  // Non-SOR last and yellow-highlighted. On a regular estimate those Non-SOR
-  // entries sit in the separate nonsor_supply / nonsor_om sections, so they
-  // have to be merged in here or they never reach the sheet at all. On a
-  // ZEST03 estimate they are already inline and the merge is a no-op.
-  const _merge = (keys)=> keys.reduce((acc,k)=> acc.concat(sectionConfig(k).items), []);
-  const supplyAll = _merge(['supply','nonsor_supply']);
-  const omAll     = _merge(['om','nonsor_om']);
-  const sectionDefs = [
-    {key:'supply',  name:'Supply  Material', pr:_pr.supply,  items:supplyAll},
-    {key:'project', name:'ETC Part',         pr:_pr.project},
-    {key:'om',      name:'Services Part',    pr:_pr.om,      items:omAll},
-    {key:'supply',  name:'Non SOR Materials', pr:_pr.supply, items:nsMaterials,
-     remarks:true, noHighlight:true, skipFirstSig:true, noSpares:true},
-    {key:'om',      name:'Non SOR Services',  pr:_pr.om,     items:nsServices,
-     remarks:true, noHighlight:true, skipFirstSig:true, noSpares:true},
-  ];
+  const sectionDefs = estimateSheetDefs(e);
   sectionDefs.forEach(def => {
     const key = def.key, name = def.name, prMatch = def.pr;
     const itemsOverride = def.items || null;
@@ -4328,7 +4322,7 @@ async function exportEstimateExcel() {
     // ---- freeze header rows + auto row heights ----
     ws['!freeze'] = { xSplit:0, ySplit:colHdrIdx+1, topLeftCell:XLSXmod.utils.encode_cell({r:colHdrIdx+1,c:0}), activePane:'bottomLeft', state:'frozen' };
     // Row 0 doubled for the 37pt company name; row 1 sized for the 28pt title.
-    const secMins = {0:69, 1:52, 2:26.2, 3:26.2, 4:26.2}; secMins[titleIdx]=36.8; secMins[colHdrIdx]=67.5;
+    const secMins = {0:42, 1:39, 2:26.2, 3:26.2, 4:26.2}; secMins[titleIdx]=36.8; secMins[colHdrIdx]=67.5;
     secMins[wordsIdx]=38.2; secMins[_sig.titleRowIdx]=48; secMins[_sig.officeRowIdx]=48;
     secMins[_sig.titleRowIdx-2]=30; secMins[_sig.titleRowIdx-1]=30;   // two rows above signatories, 1.5x
     ws['!rows'] = ws['!rows'] || [];
@@ -4370,7 +4364,7 @@ async function exportEstimateExcel() {
     applyMsetclHeaderBanner(ws, 3);
     ws['!cols'] = [{wch:75.29},{wch:20},{wch:24}];
     ws['!freeze'] = { xSplit:0, ySplit:dataStart, topLeftCell:XLSXmod.utils.encode_cell({r:dataStart,c:0}), activePane:'bottomLeft', state:'frozen' };
-    autoRowHeights(ws, 14, {0:69, 1:52, 2:26.2, 3:26.2, 4:26.2, [header.length]:36.8, [header.length+1]:28.5});
+    autoRowHeights(ws, 14, {0:42, 1:39, 2:26.2, 3:26.2, 4:26.2, [header.length]:36.8, [header.length+1]:28.5});
     XLSXmod.utils.book_append_sheet(wb, ws, 'PMO-PR Numbers');
   }
 
@@ -4576,70 +4570,111 @@ function pdfTableNode(headers, rows, opt){
                  color:PDF_TXT, fillColor:isTot?PDF_CREAM:undefined, fontSize:fs };
       }));
     });
-    return { table:{ headerRows:headers?1:0, keepWithHeaderRows:1, dontBreakRows:true, widths:w, body }, layout:pdfGoldLayout(), margin:[0,0,0,8] };
+    // headerRows is the PDF equivalent of Excel's freeze panes: every page
+    // after the first reprints the column titles, so a long item table stays
+    // readable without scrolling back. keepWithHeaderRows stops a header row
+    // being orphaned at the foot of a page with no data under it.
+    const hRows = headers ? 1 : 0;
+    return { table:{ headerRows:hRows, keepWithHeaderRows:1, dontBreakRows:true, widths:w, body }, layout:pdfGoldLayout(), margin:[0,0,0,8] };
   }
 }
 function estimatePdfContent(e){
   const content = [];
-  content.push({ text:pdfText(e.division||''), bold:true, fontSize:10, color:'#4B5563', alignment:'center' });
-  content.push({ text:'SCOPE OF WORK:- '+pdfText(e.work||e.name||''), fontSize:9, alignment:'center', margin:[0,2,0,0] });
-  content.push({ text:`Estimation No: ${pdfText(e.number||'\u2014')}   |   SOR No: ${pdfText((e.sorVersions||[]).join(', ')||'\u2014')}   |   Date: ${pdfText(fmtDate(e.date))}`, fontSize:9, alignment:'center', margin:[0,2,0,4] });
-  // Abstract
-  const abs = abstractSheetRows(true);
-  content.push(pdfBand('Abstract ('+estimateTypeLabel(e.estimateType)+')', 12, 'left'));
-  content.push(pdfTableNode(null, abs, {
+
+  // Page banner — the same five header lines the workbook prints, so a PDF
+  // page and a spreadsheet page identify themselves identically.
+  const banner = (label)=>{
+    const hdr = estimateHeaderRows(e, '', label);
+    return hdr.map((r,i)=>({
+      text: pdfText(String(r[0]||'')),
+      alignment: i<=1 ? 'center' : 'left',
+      bold: i<=1, fontSize: i===0 ? 13 : (i===1 ? 11 : 8.5),
+      fillColor: i<=1 ? '#D9DDE3' : undefined,
+      margin: [0, i===0?0:1, 0, i===4?4:1],
+    }));
+  };
+
+  // ── Abstract ──
+  content.push(...banner('Abstract'));
+  content.push(pdfTableNode(null, abstractSheetRows(true), {
     starCol:(i)=>i===1, rupeeCol:(i)=>i===2,
     totalRow:(r)=> (typeof r[1]==='string' && /^(Total Estimated cost with Centages|TOTAL ESTIMATED COST|AMC Amount Limit)/.test(r[1])),
     fs:9
   }));
-  // Sections (each on its own page)
-  const sectionDefs = [
-    ['supply','Supply Material'],['project','ETC Part'],['om','O&M Services Part'],
-    ['nonsor_supply','Non-SOR Materials'],['nonsor_om','Non-SOR Services'],
-  ].filter(d=>sectionConfig(d[0]).items.length);
-  sectionDefs.forEach(def=>{
-    const rows = sectionItemTableRows(def[0]);
-    const headers = rows[0].map(pdfAbbrHeader), body = rows.slice(1);
-    const feW = null;   // manual column widths removed — widths are derived
-    const prNo = pmoPrForSection(e, def[0]==='supply'?['supply']:def[0]==='project'?['project','etc']:['o&m','om','service']).replace(/^.*No-\s*/,'');
-    content.push(pdfBand(def[1] + (prNo?'   —   PR No.: '+prNo:''), 12, 'left', 'before'));
-    // Full Description (ZEST03) wraps like Description and shifts the amount
-    // columns right — resolve both from the un-abbreviated header row.
+
+  // ── Section sheets, in workbook order, one per page ──
+  estimateSheetDefs(e).forEach(def=>{
+    const itemsOverride = def.items || null;
+    const srcItems = itemsOverride || sectionConfig(def.key).items;
+    if (!srcItems.length) return;
+
+    let rows = sectionItemTableRows(def.key, itemsOverride, {noSpares: !!def.noSpares});
+    if (def.remarks) rows = appendRemarksColumn(rows, srcItems);
+
     const H0 = rows[0];
+    const headers = H0.map(pdfAbbrHeader), body = rows.slice(1);
+    const n = H0.length;
     const fullIdx = H0.findIndex(h=>/full\s*description/i.test(String(h)));
     const amt0 = (()=>{ const i = H0.findIndex(h=>/exworks\s*price/i.test(String(h))); return i>-1 ? i : 5; })();
+
+    // Explicit column weights, so widths are FIXED rather than re-derived from
+    // whatever text happens to be in this estimate. Same proportions the
+    // printed sheet uses: Description 30%, or 24/45 when ZEST03's Full
+    // Description is present, with the remainder shared by the numeric
+    // columns. pdfTableNode normalises these to the page, so the table always
+    // fits the width exactly.
+    let dW = 30, fW = 0;
+    if (fullIdx > -1) { dW = 24; fW = 45; }
+    const others = n - (fullIdx>-1 ? 2 : 1);
+    let rest = (100 - dW - fW) / others;
+    const MIN_COL = 3.6;
+    if (rest < MIN_COL) {
+      const avail = Math.max(100 - MIN_COL*others, 20), tot = dW + fW;
+      dW = avail*dW/tot; fW = avail*fW/tot; rest = MIN_COL;
+    }
+    const weights = new Array(n).fill(0).map((_,i)=> i===2 ? dW : (i===fullIdx ? fW : rest));
+
+    content.push({ text:'', pageBreak:'before' });
+    content.push(...banner(def.name));
     content.push(pdfTableNode(headers, body, {
       starCol:(i)=> i===2 || i===fullIdx,
-      starRatio: fullIdx>-1 ? ((i)=> i===fullIdx ? 1.5 : 0.8) : null,
-      rupeeCol:(i)=>i>=amt0, totalRow:(r)=> r[2]==='TOTAL',
-      fs: headers.length>=12?7:8, weights: feW }));
-    // audit-style totals summary (mirrors the webpage totals box)
-    const t = sectionTotalsCalc(def[0]); const rs = effectiveRates();
-    const sum = [['Base Cost (Ex-works excl. T&D)', t.base]];
-    if (t.ac) sum.push(['Additional Charge', t.ac]);
-    if ((rs.labourCess||0)>0) sum.push(['Labour Cess @ '+rs.labourCess+'%', t.lc]);
-    if (t.fi) sum.push(['Freight & Insurance @ '+rs.freightInsurance+'%', t.fi]);
-    if ((rs.gst||0)>0) sum.push(['GST @ '+rs.gst+'%', t.gst]);
-    if (t.spares) sum.push(['Supply Spares @ 3%', t.spares]);
-    sum.push([(sectionConfig(def[0]).title||'Section')+' Total'+(t.spares?' (incl. Spares)':''), t.total]);
-    content.push({ columns:[ {width:'*', text:''}, { width:280, table:{ widths:['*','auto'], body: sum.map((r,ri)=>[
-      {text:pdfText(r[0]), bold: ri===sum.length-1, fontSize:8, color:PDF_TXT, fillColor: ri===sum.length-1?PDF_CREAM:PDF_GOLD_PALE},
-      {text:'₹'+fmtNum(r[1]), alignment:'right', bold: ri===sum.length-1, fontSize:8, color:PDF_TXT, fillColor: ri===sum.length-1?PDF_CREAM:undefined}
-    ]) }, layout:pdfGoldLayout() } ], margin:[0,2,0,6] });
+      rupeeCol:(i)=> i>=amt0,
+      weights,
+      totalRow:(r)=> String(r[2]||'')==='TOTAL' || /^Add: Supply Spares|^Supply Part Total/.test(String(r[2]||'')),
+      fs:7.5,
+    }));
+    content.push(pdfSignatoryNode(e, {skipFirst: !!def.skipFirstSig}));
   });
-  // PMO / PR
+
+  // ── PMO / PR Numbers, the workbook's last tab ──
   const pmo = pmoPrAllFilled(e);
-  if (pmo.length){
-    content.push(pdfBand('PMO / PR Numbers', 12, 'left', 'before'));
-    content.push(pdfTableNode(['Label','Number'], pmo.map(p=>[p.label,p.number]), { starCol:(i)=>i===0, fs:9 }));
-  }
-  // Final Estimate mode: the uploaded ZEST03 sheet as appendix pages
-  if (typeof FE!=='undefined' && FE.attachRaw && FE.rawGrid) {
-    content.push(pdfBand(FE.rawSheetLabel||'ZEST03 (uploaded sheet)', 12, 'left', 'before'));
-    content.push(pdfTableNode(null, FE.rawGrid, { fs:6 }));
+  if (pmo.length) {
+    content.push({ text:'', pageBreak:'before' });
+    content.push(...banner('PMO / PR Numbers'));
+    content.push(pdfTableNode(['Label','Number'], pmo.map(x=>[x.label, x.number]),
+      { starCol:(i)=>i===0, weights:[70,30], fs:9 }));
+    content.push(pdfSignatoryNode(e));
   }
   return content;
 }
+
+// Signatory footer as a borderless four-up row, mirroring the sheet footer.
+function pdfSignatoryNode(e, opts){
+  let sig = estimateSignatories(e);
+  if (opts && opts.skipFirst) sig = sig.slice(1);
+  sig = sig.filter(s=>!s.hidden);
+  if (!sig.length) return { text:'' };
+  return {
+    margin:[0,26,0,0], unbreakable:true,
+    columns: sig.map(s=>({
+      width:'*', alignment:'center', stack:[
+        { text:pdfText(s.title||''), bold:true, fontSize:8.5 },
+        { text:pdfText(s.office||''), fontSize:8 },
+      ]
+    })),
+  };
+}
+
 function pdfDocBase(content){
   return {
     pageSize:'A4', pageOrientation:'landscape', pageMargins:[24,30,24,26],
@@ -4699,19 +4734,38 @@ async function printEstimate(orientation){
   const e = ST.currentEstimate;
   const root = document.createElement('div'); root.id = 'PRINT_ROOT';
   let html = `<style>${sharedPrintCSS()}</style>`;
-  const hdr = estimateHeaderRows(e, '', 'Abstract');
-  const hdrHtml = `<div class="print-banner" style="text-align:center;margin-bottom:8px">${hdr.map((r,i)=>`<div style="font-weight:${i<=1?'800':'600'};font-size:${i===0?'22':(i===1?'17':'12')}px">${escapeHtml(String(r[0]))}</div>`).join('')}</div>`;
-  const sigHtml = printSignatoryHtml(e);
-  html += `<div class="pg">${hdrHtml}<h2>Abstract</h2>${printHtmlTable(abstractSheetRows(true), {rupeeCol:(i)=>i===2})}${sigHtml}</div>`;
-  [['supply','Supply Material'],['project','ETC — Project Services'],['om','O&M Services'],['nonsor_supply','Non-SOR Materials'],['nonsor_om','Non-SOR Services']].forEach(([k,t])=>{
-    if (!sectionConfig(k).items.length) return;
-    const rows = sectionItemTableRows(k);
+  // The printed document IS the workbook, minus the ZEST03 tab: same sheet
+  // list (estimateSheetDefs), same row builders, same order. Nothing here
+  // decides what goes on a page — it only decides how those rows look on
+  // paper.
+  const banner = (label)=>{
+    const hdr = estimateHeaderRows(e, '', label);
+    return `<div class="print-banner" style="text-align:center;margin-bottom:8px">${
+      hdr.map((r,i)=>`<div style="font-weight:${i<=1?'800':'600'};font-size:${
+        i===0?'19':(i===1?'15':'11')}px;${i<=1?'background:#D9DDE3;padding:2px 0;':''}">${
+        escapeHtml(String(r[0]))}</div>`).join('')}</div>`;
+  };
+
+  // ── 1. Abstract ──
+  html += `<div class="pg">${banner('Abstract')}${
+    printHtmlTable(abstractSheetRows(true), {rupeeCol:(i)=>i===2})}${printSignatoryHtml(e)}</div>`;
+
+  // ── 2. Section sheets, in workbook order ──
+  estimateSheetDefs(e).forEach(def => {
+    const itemsOverride = def.items || null;
+    const srcItems = itemsOverride || sectionConfig(def.key).items;
+    if (!srcItems.length) return;
+
+    let rows = sectionItemTableRows(def.key, itemsOverride, {noSpares: !!def.noSpares});
+    if (def.remarks) rows = appendRemarksColumn(rows, srcItems);
+
     const n = rows[0].length;
     const fullIdx = rows[0].findIndex(h=>/full\s*description/i.test(String(h)));
     const amt0 = (()=>{ const i = rows[0].findIndex(h=>/exworks\s*price/i.test(String(h))); return i>-1 ? i : 5; })();
+
     // Description holds 30% on its own; with ZEST03's Full Description present
-    // the pair splits 80 : 150 (24% / 45%), scaled back proportionally if that
-    // would squeeze the numeric columns below a legible floor.
+    // the pair splits 24 : 45, scaled back proportionally if that would squeeze
+    // the numeric columns below a legible floor.
     const sw = new Array(n).fill(0);
     let dW = 30, fW = 0;
     if (fullIdx > -1) { dW = 24; fW = 45; }
@@ -4723,16 +4777,32 @@ async function printEstimate(orientation){
       dW = avail*dW/tot; fW = avail*fW/tot; rest = MIN_COL;
     }
     for (let i=0;i<n;i++) sw[i] = +(i===2 ? dW : (i===fullIdx ? fW : rest)).toFixed(2);
-    const prNo = pmoPrForSection(e, (k==='supply'||k==='nonsor_supply')?['supply']:k==='project'?['project','etc']:['o&m','om','service']).replace(/^.*No-\s*/,'');
-    // Header banner repeats at the top of every page, exactly like the sheets.
-    html += `<div class="pg">${hdrHtml}<h2>${escapeHtml(t)}${prNo?'   —   PR No.: '+escapeHtml(prNo):''}</h2>${printHtmlTable([rows[0].map(pdfAbbrHeader)].concat(rows.slice(1)), {rupeeCol:(i)=>i>=amt0, widths:sw, leftCol:(i)=>i===2||i===fullIdx})}${sigHtml}</div>`;
+
+    // Non-SOR sheets are signed by three, not four — same rule as the workbook.
+    const sigs = def.skipFirstSig ? printSignatoryHtml(e, {skipFirst:true}) : printSignatoryHtml(e);
+    html += `<div class="pg">${banner(def.name)}${
+      printHtmlTable([rows[0].map(pdfAbbrHeader)].concat(rows.slice(1)),
+        {rupeeCol:(i)=>i>=amt0, widths:sw, leftCol:(i)=>i===2||i===fullIdx})}${sigs}</div>`;
   });
+
+  // ── 3. PMO / PR Numbers, the workbook's last tab ──
+  const pmoRows = pmoPrAllFilled(e);
+  if (pmoRows.length) {
+    html += `<div class="pg">${banner('PMO / PR Numbers')}${
+      printHtmlTable([['Label','Number']].concat(pmoRows.map(x=>[x.label, x.number])),
+        {widths:[70,30], leftCol:(i)=>i===0||i===1})}${printSignatoryHtml(e)}</div>`;
+  }
+
   root.innerHTML = html;
   doPrintAndCleanup(root);
 }
 // Signatory footer for printed pages (mirrors the sheet footer).
-function printSignatoryHtml(e){
-  const sig = estimateSignatories(e).filter(s=>!s.hidden);
+function printSignatoryHtml(e, opts){
+  let sig = estimateSignatories(e);
+  // Non-SOR sheets carry only the last three signatories — they are audited
+  // separately before the main sheets are signed.
+  if (opts && opts.skipFirst) sig = sig.slice(1);
+  sig = sig.filter(s=>!s.hidden);
   if (!sig.length) return '';
   return `<table class="print-sig" style="margin-top:22px;border:none"><tr>${
     sig.map(s=>`<td style="border:none;text-align:center;vertical-align:bottom;padding:6px 10px;font-size:11px">
@@ -8875,7 +8945,7 @@ function renderFinalEstimateResult(){
         <div class="collapse-body"><div class="collapse-body-inner">
           <div class="flex gap-2" style="flex-wrap:wrap">
             <button class="btn btn-gold" onclick="feDownloadExcel()">⬇ Download Excel</button>
-            <button class="btn btn-ghost" onclick="feDownloadPrint()">🖨 Print</button>
+            <button class="btn btn-ghost" onclick="exportEstimatePDF()">⬇ Download PDF</button>
             <button class="btn btn-ghost" onclick="feDownloadRawZest()">⬇ Uploaded ZEST03</button>
             <button class="btn btn-ghost" onclick="renderFinalEstimateResult()">↺ Refresh Preview</button>
           </div>
