@@ -8,7 +8,7 @@
 /* Build stamp. Check the live site is running this file:
    open the browser console (F12) — the build id is printed on load.
    It is also shown at the bottom-right of the login screen. */
-window.__BUILD = "2026-08-06-n";
+window.__BUILD = "2026-08-06-o";
 document.addEventListener("DOMContentLoaded", function(){
   var el = document.createElement("div");
   el.id = "build-stamp";
@@ -50,7 +50,7 @@ window.__EARLY_BOOT = (function () {
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" onload="this.onload=null;this.rel='stylesheet'">
 <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap"></noscript>
-<link rel="stylesheet" href="styles.css?v=2026-08-06-n">
+<link rel="stylesheet" href="styles.css?v=2026-08-06-o">
 </head>
 <body>
 <div id="app"></div>
@@ -4489,7 +4489,11 @@ function pdfBand(txt, fs, align, pageBreak){
   return node;
 }
 // Printable widths (A4 pt minus page margins minus a small safety gutter)
-const PDF_W_LAND = 842 - 48 - 6;   // landscape
+// Usable width, matched to whichever page size the document is using.
+const PDF_W_A4_LAND = 842 - 56;    // A4 landscape minus margins
+const PDF_W_A3_LAND = 1191 - 72;   // A3 landscape minus 36pt side margins
+function pdfUsableWidth(){ return PDF_W_A3_LAND; }
+const PDF_W_LAND = PDF_W_A4_LAND;  // legacy default for other exports
 const PDF_W_PORT = 595 - 48 - 6;   // portrait
 // Build a pdfmake table with COMPUTED numeric column widths, normalised so
 // their sum exactly equals the printable width — a table can therefore never
@@ -4499,7 +4503,7 @@ const PDF_W_PORT = 595 - 48 - 6;   // portrait
 function pdfTableNode(headers, rows, opt){
   opt = opt || {};
   const fs = opt.fs || 8;
-  const pageW = opt.pageWidth || PDF_W_LAND;
+  const pageW = opt.pageWidth || (typeof pdfUsableWidth==='function' ? pdfUsableWidth() : PDF_W_LAND);
   const ncols = Math.max(headers?headers.length:0, ...rows.map(r=>r.length), 1);
   const pad = (r) => { const a=r.slice(); while(a.length<ncols) a.push(''); return a; };
   // measure per-column content (chars)
@@ -4575,12 +4579,15 @@ function pdfTableNode(headers, rows, opt){
     // readable without scrolling back. keepWithHeaderRows stops a header row
     // being orphaned at the foot of a page with no data under it.
     const hRows = headers ? 1 : 0;
-    return { table:{ headerRows:hRows, keepWithHeaderRows:1, dontBreakRows:true, widths:w, body }, layout:pdfGoldLayout(), margin:[0,0,0,8] };
+    // dontBreakRows is deliberately OFF. With a long Full Description in a
+    // narrow column a single row can exceed the page height, and pdfmake
+    // cannot place it — the rest of the table is then lost. Allowing a row to
+    // split keeps every item on the sheet.
+    return { table:{ headerRows:hRows, keepWithHeaderRows:1, widths:w, body }, layout:pdfGoldLayout(), margin:[0,0,0,8] };
   }
 }
 function estimatePdfContent(e){
   const content = [];
-
   // Page banner — the same five header lines the workbook prints, so a PDF
   // page and a spreadsheet page identify themselves identically.
   const banner = (label)=>{
@@ -4617,31 +4624,60 @@ function estimatePdfContent(e){
     const fullIdx = H0.findIndex(h=>/full\s*description/i.test(String(h)));
     const amt0 = (()=>{ const i = H0.findIndex(h=>/exworks\s*price/i.test(String(h))); return i>-1 ? i : 5; })();
 
-    // Explicit column weights, so widths are FIXED rather than re-derived from
-    // whatever text happens to be in this estimate. Same proportions the
-    // printed sheet uses: Description 30%, or 24/45 when ZEST03's Full
-    // Description is present, with the remainder shared by the numeric
-    // columns. pdfTableNode normalises these to the page, so the table always
-    // fits the width exactly.
-    let dW = 30, fW = 0;
-    if (fullIdx > -1) { dW = 24; fW = 45; }
-    const others = n - (fullIdx>-1 ? 2 : 1);
-    let rest = (100 - dW - fW) / others;
-    const MIN_COL = 3.6;
-    if (rest < MIN_COL) {
-      const avail = Math.max(100 - MIN_COL*others, 20), tot = dW + fW;
-      dW = avail*dW/tot; fW = avail*fW/tot; rest = MIN_COL;
+    // ── Column widths, numeric columns first ──
+    //
+    // The previous version handed Description + Full Description 69% of the
+    // page and split the remaining 31% between eleven numeric columns — about
+    // 22pt each, when "₹33,08,85,512.50" needs ~74pt. Every amount wrapped and
+    // clipped, which is why figures came out as fragments.
+    //
+    // Now the numeric columns are measured from their actual content and
+    // reserved FIRST; the text columns share whatever is left. Amounts can
+    // never be squeezed, because they are not the ones that give way.
+    // Wider tables get a smaller face. Thirteen columns at 7.5pt leaves the
+    // amounts too tight; 6.5pt buys back roughly 13% on every column.
+    const FS = 7.5;
+    const isText = (i)=> i===2 || i===fullIdx;
+    const need = new Array(n).fill(0);
+    for (let i=0;i<n;i++){
+      if (isText(i)) continue;
+      let maxLen = String(headers[i]||'').split(/\s+/).reduce((m,w)=>Math.max(m,w.length), 4);
+      body.forEach(r=>{
+        const c = r[i];
+        const t = (typeof c==='number') ? ('₹'+fmtNum(c)) : String(c==null?'':c);
+        if (t.length > maxLen) maxLen = t.length;
+      });
+      need[i] = Math.min(maxLen, 17) * FS * 0.58 + 6;      // cap runaway strings
     }
-    const weights = new Array(n).fill(0).map((_,i)=> i===2 ? dW : (i===fullIdx ? fW : rest));
+    const PAGE_W = pdfUsableWidth();
+    const reserved = need.reduce((a,b)=>a+b,0);
+    const textCols = [2].concat(fullIdx>-1 ? [fullIdx] : []);
+    let leftover = PAGE_W - reserved;
+
+    // Text columns need a floor to stay readable. If the numerics have eaten
+    // everything, claw back proportionally rather than letting a column vanish.
+    const TEXT_MIN = 52;
+    if (leftover < TEXT_MIN * textCols.length) {
+      const want = TEXT_MIN * textCols.length;
+      const shrink = (PAGE_W - want) / reserved;
+      for (let i=0;i<n;i++) if (!isText(i)) need[i] *= shrink;
+      leftover = want;
+    }
+    // Description : Full Description = 40 : 60 when both are present.
+    const share = textCols.length === 2 ? [0.4, 0.6] : [1];
+    textCols.forEach((ci,k)=> need[ci] = leftover * share[k]);
+
+    const weights = need;
 
     content.push({ text:'', pageBreak:'before' });
     content.push(...banner(def.name));
+
     content.push(pdfTableNode(headers, body, {
       starCol:(i)=> i===2 || i===fullIdx,
       rupeeCol:(i)=> i>=amt0,
       weights,
       totalRow:(r)=> String(r[2]||'')==='TOTAL' || /^Add: Supply Spares|^Supply Part Total/.test(String(r[2]||'')),
-      fs:7.5,
+      fs:FS,
     }));
     content.push(pdfSignatoryNode(e, {skipFirst: !!def.skipFirstSig}));
   });
@@ -4675,11 +4711,19 @@ function pdfSignatoryNode(e, opts){
   };
 }
 
+// A ZEST03 estimate carries 13 columns — Sr, Mat No, Description, Full
+// Description, UoM, Qty and seven money columns. On A4 landscape that leaves
+// about 42pt for Description, which is unusable, and rupee figures wrap and
+// clip. A3 landscape is the correct sheet for that shape; A4 is kept for the
+// narrower estimates where it works.
+function pdfPageSize(){ return 'A3'; }
 function pdfDocBase(content){
   return {
-    pageSize:'A4', pageOrientation:'landscape', pageMargins:[24,30,24,26],
+    pageSize:pdfPageSize(), pageOrientation:'landscape', pageMargins:[36,30,36,32],
     content, defaultStyle:{ fontSize:8, color:PDF_TXT },
-    header:function(){ return { text:pdfText(MSETCL_HEADER_LINE1), alignment:'center', fontSize:8, bold:true, color:'#4B5563', margin:[0,10,0,0] }; },
+    // No running header: the banner block at the top of each sheet already
+    // carries the company name. Printing both put it a second time in the
+    // middle of the page.
     footer:function(cur,tot){ return { text:cur+' / '+tot, alignment:'right', margin:[0,6,24,0], fontSize:7, color:'#9a9a9a' }; },
     pageBreakBefore:function(node, following){ return node.headlineLevel===1 && following.length===0; },
   };
