@@ -8,7 +8,7 @@
 /* Build stamp. Check the live site is running this file:
    open the browser console (F12) — the build id is printed on load.
    It is also shown at the bottom-right of the login screen. */
-window.__BUILD = "2026-08-06-e";
+window.__BUILD = "2026-08-06-f";
 document.addEventListener("DOMContentLoaded", function(){
   var el = document.createElement("div");
   el.id = "build-stamp";
@@ -50,7 +50,7 @@ window.__EARLY_BOOT = (function () {
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" onload="this.onload=null;this.rel='stylesheet'">
 <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap"></noscript>
-<link rel="stylesheet" href="styles.css?v=2026-08-06-e">
+<link rel="stylesheet" href="styles.css?v=2026-08-06-f">
 </head>
 <body>
 <div id="app"></div>
@@ -3060,12 +3060,11 @@ function renderActiveTab() {
 // ── Section key → {filterFn, acKey, label, calcSection} ──
 function sectionConfig(key) {
   switch(key) {
-    case 'supply': return {items: ST.currentItems.filter(it=>it.section==='supply'), acKey:'supply', title:'Supply Material', hasAC:true, hasFI:true};
-    case 'project': return {items: ST.currentItems.filter(it=>it.section==='project'), acKey:'project', title:'Project Services (ETC Part)', hasAC:true, hasFI:false};
-    case 'om': return {items: ST.currentItems.filter(it=>it.section==='om'), acKey:null, title:'O&M Services', hasAC:false, hasFI:false};
-    // Reference listings only — every rupee below is already inside Supply/O&M.
-    case 'nonsor_supply': return {items: ST.currentItems.filter(it=>it.isCustom && it.section==='supply'), acKey:'supply', title:'Non-SOR Materials', hasAC:true, hasFI:true, referenceOnly:true};
-    case 'nonsor_om': return {items: ST.currentItems.filter(it=>it.isCustom && it.section==='om'), acKey:null, title:'Non-SOR Services', hasAC:false, hasFI:false, referenceOnly:true};
+    case 'supply': return {items: ST.currentItems.filter(it=>!it.isCustom && it.section==='supply'), acKey:'supply', title:'Supply Material', hasAC:true, hasFI:true};
+    case 'project': return {items: ST.currentItems.filter(it=>!it.isCustom && it.section==='project'), acKey:'project', title:'Project Services (ETC Part)', hasAC:true, hasFI:false};
+    case 'om': return {items: ST.currentItems.filter(it=>!it.isCustom && it.section==='om'), acKey:null, title:'O&M Services', hasAC:false, hasFI:false};
+    case 'nonsor_supply': return {items: ST.currentItems.filter(it=>it.isCustom && it.section==='supply'), acKey:'nonsor_supply', title:'Non-SOR Materials', hasAC:true, hasFI:true};
+    case 'nonsor_om': return {items: ST.currentItems.filter(it=>it.isCustom && it.section==='om'), acKey:null, title:'Non-SOR Services', hasAC:false, hasFI:false};
   }
 }
 
@@ -3227,11 +3226,6 @@ function supplySparesAmount() {
 function sectionTotalsCalc(key, itemsOverride, opts) {
   const cfg0 = sectionConfig(key);
   const cfg = itemsOverride ? Object.assign({}, cfg0, {items: itemsOverride}) : cfg0;
-  // Reference-only sections (the Non-SOR listings) are shown for visibility,
-  // never summed: their items are already counted inside Supply / O&M.
-  if (cfg.referenceOnly && !itemsOverride) {
-    return {base:0, ac:0, lc:0, fi:0, gst:0, total:0, spares:0, preSparesTotal:0, referenceOnly:true};
-  }
   let base=0, ac=0, lc=0, fi=0, gst=0, total=0;
   cfg.items.forEach(it => {
     const c = calcItem(it, effectiveRates(), cfg.acKey);
@@ -3268,11 +3262,8 @@ function computeAllSectionTotals() {
   const supply = sectionTotalsCalc('supply').total;
   const project = sectionTotalsCalc('project').total;
   const om = sectionTotalsCalc('om').total;
-  // Kept in the payload for backward compatibility with stored estimates and
-  // the abstract's Non-SOR lines, but always zero now: Non-SOR amounts live
-  // inside supply/om, exactly as ZEST03 reports them.
-  const nonSorSupply = 0;
-  const nonSorOm = 0;
+  const nonSorSupply = sectionTotalsCalc('nonsor_supply').total;
+  const nonSorOm = sectionTotalsCalc('nonsor_om').total;
   return {supply, project, om, nonSorSupply, nonSorOm};
 }
 // ══════════════════════════════════════════════════════════════
@@ -3838,7 +3829,11 @@ function sectionItemTableRows(key, itemsOverride, opts) {
     sum.fi+=c.fi; sum.exFi+=c.base+c.ac+c.lc+c.fi;
     sum.gst+=c.gst; sum.total+=c.total;
   });
-  if (cfg.items.length) {
+  // noTotals: build the item table and stop. Used by the ZEST03 preview's
+  // Non-SOR listings, which exist to show WHICH items are Non-SOR. Their
+  // amounts are already counted inside Supply / O&M, so appending a TOTAL and
+  // charge block here would invite double counting.
+  if (cfg.items.length && !(opts && opts.noTotals)) {
     // TOTAL row — placed precisely under each column whatever columns exist
     const D = hasFull ? 1 : 0;          // rightward shift caused by Full Description
     const tr = new Array(headers.length).fill('');
@@ -8731,14 +8726,30 @@ function renderFinalEstimateResult(){
   //
   // Counts now come from the same filter that produces the rows, so the
   // badge can never contradict the table.
+  // ZEST03 PREVIEW ONLY. Nothing here touches the portal's own section
+  // calculations — it is all done with itemsOverride, which exists exactly so
+  // a sheet can be built from a hand-picked set of items.
+  //
+  // ZEST03 reports every line under supply / project / om regardless of whether
+  // it is SOR or Non-SOR, so the preview must do the same: those three sections
+  // list ALL items of their part, and their totals are the real ones.
+  //
+  // The Non-SOR sections below are a reading aid — "which of these are
+  // Non-SOR?" — so they are listed WITHOUT totals (noTotals). Their amounts are
+  // already inside Supply and O&M, and totalling them again would double count.
   const secRows = feWithSynthetic(()=>{
-    const build = (key)=>{
-      const n = (sectionConfig(key).items||[]).length;
-      return { rows: n ? sectionItemTableRows(key) : null, count: n };
+    const all = (sec)=> (ST.currentItems||[]).filter(it=> it.section===sec);
+    const nonSor = (sec)=> (ST.currentItems||[]).filter(it=> it.isCustom && it.section===sec);
+    const build = (key, items, opts)=>{
+      const list = items || [];
+      return { rows: list.length ? sectionItemTableRows(key, list, opts) : null, count: list.length };
     };
     return {
-      supply: build('supply'), project: build('project'), om: build('om'),
-      nonsor_supply: build('nonsor_supply'), nonsor_om: build('nonsor_om'),
+      supply:  build('supply',  all('supply')),
+      project: build('project', all('project')),
+      om:      build('om',      all('om')),
+      nonsor_supply: build('supply', nonSor('supply'), {noTotals:true, noSpares:true}),
+      nonsor_om:     build('om',     nonSor('om'),     {noTotals:true}),
     };
   });
   const secTbl = (secKey, rows) => {
@@ -8787,8 +8798,8 @@ function renderFinalEstimateResult(){
     ['supply',        'Supply Material',        'supply', true ],
     ['project',       'ETC — Project Services', 'project', true ],
     ['om',            'O&M Services',           'om',      true ],
-    ['nonsor_supply', 'Non-SOR Materials',      'supply', false],
-    ['nonsor_om',     'Non-SOR Services',       'om',     false],
+    ['nonsor_supply', 'Non-SOR Materials (listed above, not totalled)', 'supply', false],
+    ['nonsor_om',     'Non-SOR Services (listed above, not totalled)',  'om',     false],
   ];
   FE_SECTIONS.forEach(([key, title, prKey, alwaysShow])=>{
     const sec = secRows[key] || {rows:null, count:0};
