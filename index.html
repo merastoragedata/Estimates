@@ -8,7 +8,7 @@
 /* Build stamp. Check the live site is running this file:
    open the browser console (F12) — the build id is printed on load.
    It is also shown at the bottom-right of the login screen. */
-window.__BUILD = "2026-08-06-p";
+window.__BUILD = "2026-08-06-q";
 document.addEventListener("DOMContentLoaded", function(){
   var el = document.createElement("div");
   el.id = "build-stamp";
@@ -50,7 +50,7 @@ window.__EARLY_BOOT = (function () {
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" onload="this.onload=null;this.rel='stylesheet'">
 <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap"></noscript>
-<link rel="stylesheet" href="styles.css?v=2026-08-06-p">
+<link rel="stylesheet" href="styles.css?v=2026-08-06-q">
 </head>
 <body>
 <div id="app"></div>
@@ -4566,12 +4566,22 @@ function pdfTableNode(headers, rows, opt){
   }
   return buildPdfTable(widths);
   function buildPdfTable(w){
-    // Final guarantee: the columns sum to exactly the usable page width. Any
-    // per-column minimum applied upstream can push the total over the page,
-    // and pdfmake silently clips the overflow instead of reporting it.
-    const sum = w.reduce((a,b)=>a+b,0);
-    if (sum > pageW) { const k = pageW / sum; w = w.map(x=>x*k); }
-    else if (sum < pageW - 1) { const k = pageW / sum; w = w.map(x=>x*k); }
+    // THE fix for the clipped right-hand columns.
+    //
+    // pdfmake's `widths` are CONTENT widths. Cell padding (3pt each side) and
+    // the vertical border lines (0.5pt) are added ON TOP of them. Handing it
+    // the full page width therefore produced a table ~85pt wider than the
+    // page on a 13-column sheet, and pdfmake silently ran the surplus off the
+    // right edge — which is why Supply stopped mid-number at "₹33,42,95,37"
+    // and Services stopped at "Total Ex-works".
+    //
+    // Reserve that chrome FIRST, then share what genuinely remains.
+    const L = pdfGoldLayout();
+    const chrome = ncols * (L.paddingLeft() + L.paddingRight())
+                 + (ncols + 1) * L.vLineWidth();
+    const contentW = Math.max(pageW - chrome, 40);
+    const sum = w.reduce((a,b)=>a+b,0) || 1;
+    w = w.map(x => x / sum * contentW);
     const body = [];
     if (headers) body.push(pad(headers).map(hd=>({ text:pdfText(hd), bold:true, color:PDF_TXT, fillColor:PDF_GOLD_PALE, fontSize:fs })));
     rows.forEach((r,ri)=>{
